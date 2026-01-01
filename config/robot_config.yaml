@@ -1,0 +1,119 @@
+# Robot Hardware and Network Configuration
+
+# Network Settings
+network:
+  pc_ip: "192.168.1.100"        # Ubuntu PC static IP
+  pc_port: 5000                  # PC server port
+  pi_ip: "192.168.1.101"        # Raspberry Pi static IP
+  pi_display_port: 8080          # Pi face display port
+  socketio_timeout: 30           # Connection timeout (seconds)
+
+# Motor Configuration (GPIO BOARD numbering)
+motor:
+  pins:
+    L1: 33    # Left motor forward
+    L2: 38    # Left motor backward
+    R1: 35    # Right motor forward
+    R2: 40    # Right motor backward
+  pwm_frequency: 1000            # PWM frequency in Hz
+  default_speed: 70              # Default motor speed (0-100%)
+  turn_speed: 60                 # Speed during turns
+  
+# Relay Configuration (Optional)
+relay:
+  enabled: false
+  pins:
+    relay1: 15
+    relay2: 16
+    relay3: 18
+    relay4: 22
+
+# Camera Settings
+camera:
+  type: "opencv"                 # Options: "opencv", "picamera2"
+  device_index: 0                # Camera device index
+  width: 640
+  height: 480
+  fps: 30
+  flip_horizontal: false
+  flip_vertical: false
+  stream_quality: 80             # JPEG quality (1-100)
+
+# LiDAR Settings
+lidar:
+  enabled: true
+  port: "/dev/ttyUSB0"
+  baudrate: 115200
+  scan_mode: "Standard"          # Standard, Express, Boost
+  max_distance: 12.0             # meters
+  min_distance: 0.15             # meters
+  angle_min: 0                   # degrees
+  angle_max: 360                 # degrees
+
+# Ultrasonic Sensor Settings
+ultrasonic:
+  enabled: true
+  trigger_pin: 11                # GPIO BOARD numbering
+  echo_pin: 13
+  max_distance: 400              # cm
+  measurement_timeout: 0.05      # seconds
+
+# Safety Settings
+safety:
+  obstacle_threshold: 30         # Stop distance in cm
+  emergency_stop_enabled: true
+  motor_timeout: 10              # Auto-stop after seconds of inactivity
+  max_continuous_run: 60         # Max seconds motors can run continuously
+
+# Audio Settings
+audio:
+  input_device: null             # null = default microphone
+  output_device: null            # null = default speaker
+  sample_rate: 16000
+  channels: 1
+  chunk_size: 1024
+
+# Face Display Settings
+display:
+  width: 1280                    # Display resolution width
+  height: 800                    # Display resolution height
+  fullscreen: true
+  fps: 60
+  
+  # Face animation parameters
+  face:
+    eye_blink_interval: 3.0      # Average seconds between blinks
+    eye_size: 80                 # Pixel size
+    mouth_width: 120
+    mouth_height: 60
+    animation_smoothing: 0.3     # 0-1, higher = smoother
+
+# AI Settings
+ai:
+  model: "gemini-2.0-flash-exp"
+  max_tokens: 1000
+  temperature: 0.7
+  system_prompt: |
+    You are a helpful robot assistant. You can control your movement and respond to queries.
+    When user asks you to move, respond with movement commands like:
+    - "forward:<seconds>" for moving forward
+    - "backward:<seconds>" for moving backward
+    - "left" for turning left
+    - "right" for turning right
+    - "stop" to stop all movement
+    Keep responses concise and friendly.
+
+# TTS Settings
+tts:
+  voice: "en-IN-NeerjaNeural"    # Indian English voice
+  rate: "+0%"                     # Speech rate
+  volume: "+0%"                   # Volume
+  pitch: "+0Hz"                   # Pitch
+
+# Logging Settings
+logging:
+  level: "INFO"                   # DEBUG, INFO, WARNING, ERROR
+  log_to_file: true
+  log_file: "robot.log"
+  max_file_size: 10485760         # 10MB
+  backup_count: 3
