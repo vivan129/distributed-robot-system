@@ -1,194 +1,210 @@
-"""HC-SR04 ultrasonic distance sensor module."""
+#!/usr/bin/env python3
+"""
+Ultrasonic Sensor Module
+Handles HC-SR04 distance measurement
+"""
 
-import RPi.GPIO as GPIO
-import time
 import logging
-from typing import Optional
-import statistics
+import time
+from typing import Dict, Optional
+
+try:
+    import RPi.GPIO as GPIO
+except ImportError:
+    # Mock GPIO for testing
+    class MockGPIO:
+        BOARD = 'BOARD'
+        BCM = 'BCM'
+        OUT = 'OUT'
+        IN = 'IN'
+        HIGH = 1
+        LOW = 0
+        
+        @staticmethod
+        def setmode(mode): pass
+        @staticmethod
+        def setwarnings(flag): pass
+        @staticmethod
+        def setup(pin, mode): pass
+        @staticmethod
+        def output(pin, state): pass
+        @staticmethod
+        def input(pin): return 0
+        @staticmethod
+        def cleanup(): pass
+    
+    GPIO = MockGPIO()
+    logging.warning("RPi.GPIO not available, using mock GPIO")
 
 logger = logging.getLogger(__name__)
 
-
 class UltrasonicSensor:
-    """HC-SR04 ultrasonic distance sensor interface."""
+    """HC-SR04 ultrasonic distance sensor."""
     
-    def __init__(self, config: dict):
+    def __init__(self, config: Dict):
         """Initialize ultrasonic sensor.
         
         Args:
-            config: Configuration dict with ultrasonic settings
+            config: Configuration dictionary from robot_config.yaml
         """
         self.config = config
-        self.ultrasonic_config = config['ultrasonic']
-        
-        if not self.ultrasonic_config.get('enabled', True):
-            logger.info("Ultrasonic sensor disabled in config")
-            return
-        
-        self.trigger_pin = self.ultrasonic_config['trigger_pin']
-        self.echo_pin = self.ultrasonic_config['echo_pin']
-        self.max_distance = self.ultrasonic_config.get('max_distance', 400)  # cm
-        self.timeout = self.ultrasonic_config.get('measurement_timeout', 0.05)  # seconds
+        self.us_config = config.get('ultrasonic', {})
         
         # Setup GPIO
-        GPIO.setmode(GPIO.BOARD)
+        pin_mode = config.get('motors', {}).get('pin_mode', 'BOARD')
+        GPIO.setmode(GPIO.BOARD if pin_mode == 'BOARD' else GPIO.BCM)
+        GPIO.setwarnings(False)
+        
+        self.trigger_pin = self.us_config.get('trigger_pin', 11)
+        self.echo_pin = self.us_config.get('echo_pin', 13)
+        self.max_distance = self.us_config.get('max_distance', 400)  # cm
+        self.timeout = self.us_config.get('measurement_timeout', 0.5)
+        self.samples = self.us_config.get('samples', 3)
+        
+        # Setup pins
         GPIO.setup(self.trigger_pin, GPIO.OUT)
         GPIO.setup(self.echo_pin, GPIO.IN)
-        
-        # Ensure trigger is low
         GPIO.output(self.trigger_pin, GPIO.LOW)
-        time.sleep(0.1)
         
-        logger.info(f"✓ Ultrasonic sensor initialized (Trig: {self.trigger_pin}, Echo: {self.echo_pin})")
+        time.sleep(0.1)  # Settle time
+        
+        logger.info(f"Ultrasonic sensor initialized (Trigger: {self.trigger_pin}, Echo: {self.echo_pin})")
     
-    def measure_distance(self) -> Optional[float]:
-        """Measure distance to nearest object.
+    def measure_once(self) -> Optional[float]:
+        """Measure distance once.
         
         Returns:
-            float: Distance in centimeters, or None if measurement failed
+            Distance in cm or None if timeout
         """
         try:
-            # Send 10us pulse to trigger
+            # Send trigger pulse
             GPIO.output(self.trigger_pin, GPIO.HIGH)
             time.sleep(0.00001)  # 10 microseconds
             GPIO.output(self.trigger_pin, GPIO.LOW)
             
             # Wait for echo start
-            pulse_start = time.time()
-            timeout_start = pulse_start
-            
-            while GPIO.input(self.echo_pin) == 0:
+            timeout_start = time.time()
+            while GPIO.input(self.echo_pin) == GPIO.LOW:
                 pulse_start = time.time()
-                if pulse_start - timeout_start > self.timeout:
-                    logger.warning("Ultrasonic timeout waiting for echo start")
+                if (pulse_start - timeout_start) > self.timeout:
                     return None
             
             # Wait for echo end
-            pulse_end = time.time()
-            timeout_end = pulse_end
-            
-            while GPIO.input(self.echo_pin) == 1:
+            timeout_start = time.time()
+            while GPIO.input(self.echo_pin) == GPIO.HIGH:
                 pulse_end = time.time()
-                if pulse_end - timeout_end > self.timeout:
-                    logger.warning("Ultrasonic timeout waiting for echo end")
+                if (pulse_end - timeout_start) > self.timeout:
                     return None
             
             # Calculate distance
             pulse_duration = pulse_end - pulse_start
+            distance = pulse_duration * 17150  # Speed of sound / 2
+            distance = round(distance, 2)
             
-            # Speed of sound: 343 m/s = 34300 cm/s
-            # Distance = (Time × Speed) / 2 (round trip)
-            distance = (pulse_duration * 34300) / 2
-            
-            # Validate measurement
+            # Validate range
             if 2 <= distance <= self.max_distance:
-                return round(distance, 2)
+                return distance
             else:
-                logger.debug(f"Out of range measurement: {distance} cm")
                 return None
-        
+                
         except Exception as e:
-            logger.error(f"Distance measurement error: {e}")
+            logger.error(f"Measurement error: {e}")
             return None
     
-    def get_average_distance(self, samples: int = 5) -> Optional[float]:
-        """Get average distance from multiple measurements.
-        
-        Args:
-            samples: Number of measurements to average
+    def measure(self) -> Optional[float]:
+        """Measure distance with averaging.
         
         Returns:
-            float: Average distance in cm, or None if failed
+            Average distance in cm or None if failed
         """
         measurements = []
         
-        for _ in range(samples):
-            distance = self.measure_distance()
+        for _ in range(self.samples):
+            distance = self.measure_once()
             if distance is not None:
                 measurements.append(distance)
-            time.sleep(0.01)  # Small delay between measurements
+            time.sleep(0.05)  # 50ms between samples
         
-        if not measurements:
+        if measurements:
+            avg_distance = sum(measurements) / len(measurements)
+            logger.debug(f"Distance: {avg_distance:.2f} cm")
+            return round(avg_distance, 2)
+        else:
+            logger.warning("All measurements failed")
             return None
-        
-        # Return median to filter outliers
-        return round(statistics.median(measurements), 2)
     
-    def get_filtered_distance(self, samples: int = 5, outlier_threshold: float = 10.0) -> Optional[float]:
-        """Get distance with outlier filtering.
+    def is_obstacle_close(self, threshold: float = None) -> bool:
+        """Check if obstacle is within threshold.
         
         Args:
-            samples: Number of measurements to take
-            outlier_threshold: Maximum allowed deviation from median (cm)
+            threshold: Distance threshold in cm (uses config if None)
         
         Returns:
-            float: Filtered average distance in cm, or None if failed
-        """
-        measurements = []
-        
-        for _ in range(samples):
-            distance = self.measure_distance()
-            if distance is not None:
-                measurements.append(distance)
-            time.sleep(0.01)
-        
-        if len(measurements) < 3:
-            return None
-        
-        # Calculate median
-        median = statistics.median(measurements)
-        
-        # Filter outliers
-        filtered = [d for d in measurements if abs(d - median) <= outlier_threshold]
-        
-        if filtered:
-            return round(sum(filtered) / len(filtered), 2)
-        return None
-    
-    def is_obstacle_detected(self, threshold: Optional[float] = None) -> bool:
-        """Check if obstacle is within threshold distance.
-        
-        Args:
-            threshold: Distance threshold in cm. Uses config default if None.
-        
-        Returns:
-            bool: True if obstacle detected within threshold
+            True if obstacle detected within threshold
         """
         if threshold is None:
-            threshold = self.config['safety']['obstacle_threshold']
+            threshold = self.config.get('safety', {}).get('obstacle_threshold', 30)
         
-        distance = self.get_average_distance(samples=3)
-        
-        if distance is None:
-            return False
-        
-        return distance < threshold
-    
-    def get_status(self) -> dict:
-        """Get sensor status and current reading.
-        
-        Returns:
-            dict: Status information
-        """
-        distance = self.get_average_distance(samples=3)
-        
-        return {
-            'enabled': self.ultrasonic_config.get('enabled', True),
-            'distance_cm': distance,
-            'trigger_pin': self.trigger_pin,
-            'echo_pin': self.echo_pin,
-            'max_distance': self.max_distance
-        }
+        distance = self.measure()
+        if distance is not None and distance < threshold:
+            logger.warning(f"Obstacle detected at {distance:.2f} cm!")
+            return True
+        return False
     
     def cleanup(self):
-        """Clean up GPIO pins."""
-        logger.info("Cleaning up ultrasonic sensor GPIO...")
+        """Clean up GPIO resources."""
         try:
-            GPIO.output(self.trigger_pin, GPIO.LOW)
-            logger.info("✓ Ultrasonic sensor cleanup complete")
+            logger.info("Cleaning up ultrasonic sensor GPIO...")
+            # Note: Don't call GPIO.cleanup() here as motors also use GPIO
+            # Cleanup should be done once in main program
+            logger.info("Ultrasonic sensor cleanup complete")
         except Exception as e:
-            logger.error(f"Ultrasonic cleanup error: {e}")
+            logger.error(f"Cleanup error: {e}")
     
-    def __del__(self):
-        """Cleanup on object destruction."""
-        self.cleanup()
+    def get_status(self) -> Dict:
+        """Get sensor status.
+        
+        Returns:
+            Status dictionary
+        """
+        return {
+            'trigger_pin': self.trigger_pin,
+            'echo_pin': self.echo_pin,
+            'max_distance': self.max_distance,
+            'samples': self.samples
+        }
+
+
+if __name__ == "__main__":
+    # Test ultrasonic sensor
+    import yaml
+    
+    logging.basicConfig(level=logging.INFO)
+    
+    with open('../config/robot_config.yaml') as f:
+        config = yaml.safe_load(f)
+    
+    sensor = UltrasonicSensor(config)
+    
+    try:
+        print("\nMeasuring distance 10 times (press Ctrl+C to stop)...")
+        for i in range(10):
+            distance = sensor.measure()
+            if distance:
+                print(f"{i+1}. Distance: {distance:.2f} cm")
+            else:
+                print(f"{i+1}. Measurement failed")
+            time.sleep(1)
+        
+        print("\nTest obstacle detection (threshold=30cm)")
+        if sensor.is_obstacle_close(30):
+            print("⚠️  Obstacle detected!")
+        else:
+            print("✓ Path clear")
+        
+        print("\nTest complete!")
+        
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+    finally:
+        sensor.cleanup()
