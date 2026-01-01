@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """
-AI Brain Module - Google Gemini Integration
+AI Brain Module - Google Gemini Integration (NEW SDK)
 
 Handles natural language processing, command interpretation,
 and intelligent conversation using Google Gemini AI.
+
+REQUIRES: Python 3.9+ and google-genai package
 """
 
 import os
 import re
 import logging
-from typing import Dict, Tuple, Optional
-import google.generativeai as genai
+from typing import Dict, Tuple, Optional, List
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -34,29 +37,21 @@ class AIBrain:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY not found in environment variables")
         
-        # Configure Gemini
-        genai.configure(api_key=self.api_key)
+        # Initialize client with NEW SDK
+        self.client = genai.Client(api_key=self.api_key)
         
         # Model configuration
         self.model_name = self.config.get('model', 'gemini-2.0-flash-exp')
-        
-        # Generation config
-        self.generation_config = {
-            "temperature": self.config.get('temperature', 0.7),
-            "max_output_tokens": self.config.get('max_tokens', 1024),
-        }
-        
-        # Initialize model
-        self.model = genai.GenerativeModel(
-            model_name=self.model_name,
-            generation_config=self.generation_config
+        self.generation_config = types.GenerateContentConfig(
+            temperature=self.config.get('temperature', 0.7),
+            max_output_tokens=self.config.get('max_tokens', 1024),
         )
         
         # System prompt
         self.system_prompt = self.config.get('system_prompt', '')
         
-        # Chat history
-        self.chat = self.model.start_chat(history=[])
+        # Chat history (manual management with new SDK)
+        self.chat_history: List[Dict[str, str]] = []
         
         # Movement command patterns
         self.movement_patterns = {
@@ -67,7 +62,7 @@ class AIBrain:
             'stop': re.compile(r'\b(stop|halt|brake)\b', re.IGNORECASE),
         }
         
-        logger.info(f"AI Brain initialized with model: {self.model_name}")
+        logger.info(f"AI Brain initialized with NEW SDK - model: {self.model_name}")
     
     def process(self, user_input: str) -> Tuple[str, Optional[Dict]]:
         """
@@ -83,14 +78,40 @@ class AIBrain:
             # Check for movement commands
             movement_cmd = self._extract_movement_command(user_input)
             
-            # Generate AI response
-            if self.system_prompt:
-                prompt = f"{self.system_prompt}\n\nUser: {user_input}"
-            else:
-                prompt = user_input
-                
-            response = self.chat.send_message(prompt)
+            # Build conversation context
+            contents = []
+            
+            # Add system prompt as first message
+            if self.system_prompt and not self.chat_history:
+                contents.append(self.system_prompt)
+            
+            # Add chat history
+            for msg in self.chat_history[-10:]:
+                role_prefix = "User" if msg['role'] == 'user' else "Assistant"
+                contents.append(f"{role_prefix}: {msg['content']}")
+            
+            # Add current user input
+            contents.append(f"User: {user_input}")
+            
+            # Join all context
+            full_prompt = "\n\n".join(contents)
+            
+            # Generate AI response using NEW SDK
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=full_prompt,
+                config=self.generation_config
+            )
+            
             response_text = response.text.strip()
+            
+            # Update chat history
+            self.chat_history.append({'role': 'user', 'content': user_input})
+            self.chat_history.append({'role': 'assistant', 'content': response_text})
+            
+            # Keep only last 20 messages to prevent context overflow
+            if len(self.chat_history) > 20:
+                self.chat_history = self.chat_history[-20:]
             
             logger.info(f"User: {user_input}")
             logger.info(f"Robot: {response_text}")
@@ -161,12 +182,12 @@ class AIBrain:
     
     def reset_conversation(self):
         """Reset chat history."""
-        self.chat = self.model.start_chat(history=[])
+        self.chat_history = []
         logger.info("Conversation history reset")
     
-    def get_conversation_history(self) -> list:
+    def get_conversation_history(self) -> List[Dict[str, str]]:
         """Get current conversation history."""
-        return self.chat.history
+        return self.chat_history
 
 
 if __name__ == "__main__":
@@ -193,7 +214,7 @@ if __name__ == "__main__":
     ]
     
     print("\n" + "="*60)
-    print("AI BRAIN TEST")
+    print("AI BRAIN TEST (NEW GOOGLE-GENAI SDK)")
     print("="*60 + "\n")
     
     for user_input in test_inputs:

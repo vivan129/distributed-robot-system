@@ -5,8 +5,8 @@ python-socketio[client]==5.10.0
 python-dotenv==1.0.0
 PyYAML==6.0.1
 
-# AI & NLP
-google-generativeai>=0.8.0
+# AI & NLP - NEW SDK (Requires Python 3.9+)
+google-genai>=0.2.0
 edge-tts==6.1.9
 speechrecognition==3.10.1
 PyAudio==0.2.14
