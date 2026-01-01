@@ -1,138 +1,260 @@
-# SLAM (Simultaneous Localization and Mapping) Configuration
+# ============================================================================
+# SLAM Configuration
+# ============================================================================
+# Configuration for Simultaneous Localization and Mapping using RP-LIDAR A1
 
-# Map Parameters
+# Map Configuration
+# ============================================================================
 map:
-  resolution: 0.05               # meters per pixel
-  size: [2000, 2000]             # [width, height] in pixels
-  origin: [1000, 1000]           # [x, y] center point
-  default_value: 127             # Unknown cell value (0-255)
-  occupied_threshold: 200        # Cell considered occupied if > this
-  free_threshold: 50             # Cell considered free if < this
+  # Grid map dimensions
+  width: 2000                      # pixels
+  height: 2000                     # pixels
+  resolution: 0.05                 # meters per pixel (5cm)
+  
+  # Map bounds (meters)
+  bounds:
+    x_min: -50.0
+    x_max: 50.0
+    y_min: -50.0
+    y_max: 50.0
+  
+  # Initial robot position (map center)
+  origin:
+    x: 1000                        # pixels
+    y: 1000                        # pixels
+    theta: 0.0                     # radians
+
+# Occupancy Grid Settings
+# ============================================================================
+occupancy:
+  # Probability values
+  free_threshold: 0.3              # Cells below this are free
+  occupied_threshold: 0.7          # Cells above this are occupied
+  unknown_value: 0.5               # Initial/unknown cell value
+  
+  # Update parameters
+  hit_probability: 0.7             # P(occupied | hit)
+  miss_probability: 0.3            # P(occupied | miss)
+  
+  # Log-odds updates
+  log_odds_hit: 0.4                # Increase when hit
+  log_odds_miss: -0.4              # Decrease when miss
+  log_odds_max: 3.5                # Maximum log-odds value
+  log_odds_min: -3.5               # Minimum log-odds value
 
 # LiDAR Processing
+# ============================================================================
 lidar:
-  range_min: 0.15                # Minimum valid range (meters)
-  range_max: 12.0                # Maximum valid range (meters)
-  angle_increment: 1.0           # Degrees between samples
-  scan_time: 0.1                 # Time per scan (seconds)
+  # Range filtering
+  range_min: 0.15                  # meters - ignore closer readings
+  range_max: 12.0                  # meters - ignore farther readings
   
-  # Filtering
-  median_filter_size: 3          # Remove noise spikes
-  range_filter_enabled: true
-  max_range_variance: 0.1        # Filter out inconsistent readings
-
-# Occupancy Grid Mapping
-occupancy:
-  hit_probability: 0.7           # P(cell occupied | hit)
-  miss_probability: 0.4          # P(cell occupied | miss)
-  prior_probability: 0.5         # Initial belief
+  # Angle filtering
+  angle_min: 0                     # degrees
+  angle_max: 360                   # degrees
+  angle_resolution: 1.0            # degrees
   
-  # Log-odds parameters
-  log_odds_hit: 0.85
-  log_odds_miss: -0.4
-  log_odds_min: -5.0
-  log_odds_max: 5.0
+  # Quality filtering
+  quality_threshold: 10            # Minimum scan quality (0-15)
   
-  # Ray tracing
-  bresenham_step: 1              # Pixels per ray step
-  inflation_radius: 0.2          # meters - obstacle inflation
+  # Outlier removal
+  outlier_removal:
+    enabled: true
+    radius: 0.1                    # meters
+    min_neighbors: 2               # Minimum points in radius
+  
+  # Noise reduction
+  median_filter:
+    enabled: true
+    window_size: 5                 # Number of samples
 
 # Localization
+# ============================================================================
 localization:
-  # Particle Filter Parameters
+  # Update frequency
+  update_rate: 10                  # Hz
+  
+  # Odometry model
+  odometry:
+    enabled: false                 # Use wheel encoders if available
+    alpha1: 0.1                    # Rotation noise from rotation
+    alpha2: 0.1                    # Rotation noise from translation
+    alpha3: 0.1                    # Translation noise from translation
+    alpha4: 0.1                    # Translation noise from rotation
+  
+  # Scan matching
+  scan_matching:
+    method: "icp"                  # icp, ndt, correlative
+    max_iterations: 50
+    convergence_threshold: 0.001   # meters
+    max_correspondence_distance: 0.5  # meters
+
+# Particle Filter (if using)
+# ============================================================================
+particle_filter:
+  enabled: false
   num_particles: 500
-  initial_pose: [0.0, 0.0, 0.0]  # [x, y, theta] in meters and radians
-  
-  # Motion Model Noise
-  alpha1: 0.1                    # Rotation noise from rotation
-  alpha2: 0.1                    # Rotation noise from translation
-  alpha3: 0.1                    # Translation noise from translation
-  alpha4: 0.1                    # Translation noise from rotation
-  
-  # Sensor Model
-  z_hit: 0.95                    # Weight for correct range
-  z_short: 0.01                  # Weight for short readings
-  z_max: 0.01                    # Weight for max range
-  z_rand: 0.03                   # Weight for random readings
-  sigma_hit: 0.2                 # Std dev of measurement noise
   
   # Resampling
-  resample_threshold: 0.5        # Neff threshold for resampling
-  recovery_alpha_slow: 0.001
-  recovery_alpha_fast: 0.1
+  resample_threshold: 0.5          # Effective sample size ratio
+  
+  # Noise parameters
+  motion_noise:
+    translation: 0.1               # meters
+    rotation: 0.05                 # radians
+  
+  measurement_noise:
+    range: 0.1                     # meters
+    angle: 0.05                    # radians
 
-# Path Planning
-path_planning:
-  algorithm: "a_star"             # Options: "dijkstra", "a_star", "rrt"
+# Mapping Algorithm
+# ============================================================================
+mapping:
+  # Algorithm type
+  algorithm: "bresenham"           # bresenham, dda, ray_tracing
   
-  # A* Parameters
-  diagonal_movement: true
-  heuristic: "euclidean"         # Options: "manhattan", "euclidean", "octile"
+  # Ray tracing parameters
+  ray_tracing:
+    step_size: 0.01                # meters
+    max_range: 12.0                # meters
   
-  # Path Smoothing
-  smooth_path: true
-  smoothing_iterations: 10
-  smoothing_weight_data: 0.5
-  smoothing_weight_smooth: 0.3
+  # Update strategy
+  update_strategy: "incremental"  # incremental, batch
   
-  # Safety margins
-  robot_radius: 0.25             # meters
-  safety_distance: 0.1           # Additional clearance
-  
-  # Goal tolerance
-  xy_goal_tolerance: 0.1         # meters
-  yaw_goal_tolerance: 0.1        # radians
+  # Map management
+  map_expansion:
+    enabled: true
+    expansion_threshold: 0.9       # Expand when 90% full
+    expansion_size: 500            # pixels to add
 
 # Loop Closure Detection
+# ============================================================================
 loop_closure:
-  enabled: true
-  min_travel_distance: 2.0       # meters before checking
-  min_time_interval: 30          # seconds between checks
-  score_threshold: 0.8           # Similarity threshold (0-1)
-  max_candidates: 5              # Number of candidates to check
-
-# Odometry
-odometry:
-  source: "encoder"               # Options: "encoder", "visual", "imu"
+  enabled: false                   # Requires more advanced SLAM
   
-  # Wheel odometry parameters
-  wheel_base: 0.3                # meters between wheels
-  wheel_radius: 0.065            # meters
-  encoder_ticks_per_rev: 360
+  # Detection parameters
+  min_distance: 5.0                # meters - minimum distance between poses
+  max_distance: 2.0                # meters - maximum distance for closure
+  angle_threshold: 0.5             # radians
   
-  # Covariance (x, y, theta)
-  covariance_xx: 0.01
-  covariance_yy: 0.01
-  covariance_aa: 0.05
+  # Verification
+  min_matches: 10                  # Minimum feature matches
+  ransac_iterations: 100
 
-# Update Rates
-update_rates:
-  map_update_hz: 10              # Map update frequency
-  pose_publish_hz: 20            # Pose broadcast frequency
-  tf_publish_hz: 50              # Transform updates
-  visualization_hz: 5            # Dashboard updates
+# Path Planning
+# ============================================================================
+path_planning:
+  # Algorithm
+  algorithm: "a_star"              # a_star, dijkstra, rrt
+  
+  # A* parameters
+  heuristic: "euclidean"           # euclidean, manhattan, diagonal
+  diagonal_cost: 1.414             # Cost for diagonal movement
+  
+  # Safety margins
+  robot_radius: 0.3                # meters - inflation radius
+  safety_margin: 0.1               # meters - additional clearance
+  
+  # Path smoothing
+  smoothing:
+    enabled: true
+    method: "bezier"               # bezier, spline, gradient_descent
+    iterations: 10
 
 # Visualization
+# ============================================================================
 visualization:
-  show_particles: true
-  show_rays: false               # Ray tracing visualization
+  # Display settings
+  show_particles: false
+  show_scan: true
   show_path: true
-  particle_color: [255, 0, 0]    # RGB
-  path_color: [0, 255, 0]
-  robot_color: [0, 0, 255]
-  line_thickness: 2
+  show_robot: true
+  
+  # Colors (RGB 0-255)
+  colors:
+    free: [255, 255, 255]          # White
+    occupied: [0, 0, 0]            # Black
+    unknown: [128, 128, 128]       # Gray
+    robot: [255, 0, 0]             # Red
+    scan: [0, 255, 0]              # Green
+    path: [0, 0, 255]              # Blue
+  
+  # Map display
+  display_scale: 1.0               # Zoom factor
+  update_rate: 5                   # Hz - visualization refresh rate
 
-# Map Saving
-map_save:
+# Data Logging
+# ============================================================================
+logging:
+  # Save data
+  save_maps: true
+  save_scans: false
+  save_poses: true
+  
+  # Output directory
+  output_directory: "slam_data"
+  
+  # File formats
+  map_format: "pgm"                # pgm, png, numpy
+  metadata_format: "yaml"          # yaml, json
+  
+  # Save frequency
+  save_interval: 30                # seconds
   auto_save: true
-  save_interval: 300             # seconds
-  save_directory: "maps/"
-  format: "pgm"                  # Options: "pgm", "png", "yaml"
-  include_metadata: true
 
-# Performance
+# Performance Optimization
+# ============================================================================
 performance:
-  max_processing_time: 0.1       # seconds per update
-  multithreading: true
-  num_threads: 4
-  use_gpu: false                 # GPU acceleration if available
+  # Processing
+  multi_threading: true
+  max_threads: 2
+  
+  # Memory management
+  max_map_size: 1048576            # bytes (1MB) - trigger optimization
+  compress_maps: false
+  
+  # Update throttling
+  skip_frames: 0                   # Process every Nth frame (0 = all)
+  adaptive_processing: true        # Reduce rate under load
+
+# ROS Integration (Optional)
+# ============================================================================
+ros:
+  enabled: false
+  
+  # Topics
+  topics:
+    scan: "/scan"
+    map: "/map"
+    pose: "/pose"
+    path: "/path"
+  
+  # Frame IDs
+  frames:
+    map: "map"
+    odom: "odom"
+    base_link: "base_link"
+    laser: "laser"
+  
+  # Transform
+  publish_tf: true
+  tf_rate: 20                      # Hz
+
+# Advanced Features
+# ============================================================================
+advanced:
+  # Multi-floor mapping
+  multi_floor:
+    enabled: false
+    floor_height_threshold: 2.0    # meters
+  
+  # Dynamic obstacles
+  dynamic_obstacles:
+    enabled: false
+    decay_rate: 0.01               # Probability decay per update
+  
+  # Semantic mapping
+  semantic_mapping:
+    enabled: false
+    use_camera: false
+    object_recognition: false
