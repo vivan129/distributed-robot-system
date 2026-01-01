@@ -1,189 +1,250 @@
-"""Camera streaming module supporting OpenCV and Picamera2."""
+#!/usr/bin/env python3
+"""
+Camera Streamer Module - Video Streaming
 
+Streams camera frames from Raspberry Pi to PC server.
+Supports OpenCV, Picamera2, and USB cameras.
+
+Author: Distributed Robot System
+Date: January 2026
+"""
+
+import logging
 import cv2
 import numpy as np
-import logging
-from typing import Generator, Optional, Tuple
 import time
+from typing import Optional, Generator, Dict
+import io
 
-try:
-    from picamera2 import Picamera2
-    PICAMERA2_AVAILABLE = True
-except ImportError:
-    PICAMERA2_AVAILABLE = False
-    
 logger = logging.getLogger(__name__)
 
 
 class CameraStreamer:
-    """Stream camera frames with support for multiple camera types."""
+    """Camera streaming handler for Raspberry Pi."""
     
-    def __init__(self, config: dict):
-        """Initialize camera based on config.
+    def __init__(self, config: Dict):
+        """
+        Initialize camera streamer.
         
         Args:
-            config: Configuration dict with camera settings
+            config: Camera configuration dictionary
         """
-        self.config = config
-        self.camera_config = config['camera']
-        self.camera_type = self.camera_config['type']
-        self.camera = None
-        self.running = False
+        self.config = config.get('camera', {})
         
+        # Camera settings
+        self.camera_type = self.config.get('type', 'opencv')
+        self.width = self.config.get('width', 640)
+        self.height = self.config.get('height', 480)
+        self.fps = self.config.get('fps', 30)
+        self.quality = self.config.get('stream_quality', 85)
+        
+        # State
+        self.camera = None
+        self.is_streaming = False
+        self.frame_count = 0
+        self.last_frame_time = time.time()
+        
+        # Initialize camera
         self._initialize_camera()
+        
+        logger.info(f"Camera Streamer initialized ({self.camera_type}: {self.width}x{self.height} @ {self.fps}fps)")
     
     def _initialize_camera(self):
-        """Initialize camera hardware."""
+        """Initialize camera based on configured type."""
         try:
-            if self.camera_type == 'picamera2' and PICAMERA2_AVAILABLE:
+            if self.camera_type == 'opencv':
+                self._init_opencv_camera()
+            elif self.camera_type == 'picamera2':
                 self._init_picamera2()
             else:
-                self._init_opencv()
-            
-            logger.info(f"✓ Camera initialized: {self.camera_type}")
+                raise ValueError(f"Unknown camera type: {self.camera_type}")
         except Exception as e:
             logger.error(f"Camera initialization failed: {e}")
             raise
     
-    def _init_picamera2(self):
-        """Initialize Picamera2 for Raspberry Pi camera module."""
-        self.camera = Picamera2()
-        
-        config = self.camera.create_preview_configuration(
-            main={
-                'size': (self.camera_config['width'], self.camera_config['height']),
-                'format': 'RGB888'
-            }
-        )
-        
-        self.camera.configure(config)
-        self.camera.start()
-        time.sleep(2)  # Camera warm-up
-        
-        logger.info("Picamera2 started")
-    
-    def _init_opencv(self):
-        """Initialize OpenCV camera (USB webcam or Pi camera via V4L2)."""
-        device_index = self.camera_config.get('device_index', 0)
-        self.camera = cv2.VideoCapture(device_index)
+    def _init_opencv_camera(self):
+        """Initialize OpenCV camera."""
+        self.camera = cv2.VideoCapture(0)
         
         if not self.camera.isOpened():
-            raise RuntimeError(f"Failed to open camera at index {device_index}")
+            raise RuntimeError("Failed to open camera")
         
-        # Set resolution
-        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.camera_config['width'])
-        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.camera_config['height'])
-        self.camera.set(cv2.CAP_PROP_FPS, self.camera_config['fps'])
+        # Set camera properties
+        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        self.camera.set(cv2.CAP_PROP_FPS, self.fps)
         
-        logger.info(f"OpenCV camera started (device {device_index})")
+        # Verify settings
+        actual_width = int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_height = int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        logger.info(f"OpenCV camera initialized ({actual_width}x{actual_height})")
+    
+    def _init_picamera2(self):
+        """Initialize Picamera2."""
+        try:
+            from picamera2 import Picamera2
+            
+            self.camera = Picamera2()
+            
+            config = self.camera.create_preview_configuration(
+                main={"size": (self.width, self.height), "format": "RGB888"},
+                controls={"FrameRate": self.fps}
+            )
+            
+            self.camera.configure(config)
+            self.camera.start()
+            
+            logger.info(f"Picamera2 initialized ({self.width}x{self.height})")
+            
+        except ImportError:
+            raise RuntimeError("Picamera2 not installed. Run: pip install picamera2")
     
     def capture_frame(self) -> Optional[np.ndarray]:
-        """Capture a single frame from camera.
+        """
+        Capture a single frame.
         
         Returns:
-            np.ndarray: Frame as BGR image, or None if capture failed
+            Frame as numpy array or None
         """
         try:
-            if self.camera_type == 'picamera2' and PICAMERA2_AVAILABLE:
-                frame = self.camera.capture_array()
-                # Convert RGB to BGR for OpenCV compatibility
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            else:
+            if self.camera_type == 'opencv':
                 ret, frame = self.camera.read()
                 if not ret:
                     logger.warning("Failed to capture frame")
                     return None
+                return frame
             
-            # Apply transformations
-            if self.camera_config.get('flip_horizontal'):
-                frame = cv2.flip(frame, 1)
-            if self.camera_config.get('flip_vertical'):
-                frame = cv2.flip(frame, 0)
+            elif self.camera_type == 'picamera2':
+                frame = self.camera.capture_array()
+                return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             
-            return frame
-        
         except Exception as e:
             logger.error(f"Frame capture error: {e}")
             return None
     
-    def stream_frames(self, quality: int = 80) -> Generator[bytes, None, None]:
-        """Stream frames as JPEG bytes.
+    def encode_frame(self, frame: np.ndarray) -> Optional[bytes]:
+        """
+        Encode frame to JPEG.
         
         Args:
-            quality: JPEG compression quality (1-100)
+            frame: Frame to encode
+        
+        Returns:
+            JPEG bytes or None
+        """
+        try:
+            # Encode to JPEG
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), self.quality]
+            result, encoded = cv2.imencode('.jpg', frame, encode_param)
+            
+            if not result:
+                logger.warning("Frame encoding failed")
+                return None
+            
+            return encoded.tobytes()
+            
+        except Exception as e:
+            logger.error(f"Frame encoding error: {e}")
+            return None
+    
+    def stream(self) -> Generator[bytes, None, None]:
+        """
+        Stream frames continuously.
         
         Yields:
-            bytes: JPEG-encoded frame data
+            JPEG encoded frames
         """
-        self.running = True
-        logger.info("Starting camera stream...")
+        self.is_streaming = True
         
-        while self.running:
+        while self.is_streaming:
+            # Capture frame
             frame = self.capture_frame()
             
-            if frame is not None:
-                # Encode as JPEG
-                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
-                success, buffer = cv2.imencode('.jpg', frame, encode_param)
-                
-                if success:
-                    yield buffer.tobytes()
+            if frame is None:
+                time.sleep(0.1)
+                continue
             
-            time.sleep(0.033)  # ~30 FPS
+            # Encode frame
+            jpeg_bytes = self.encode_frame(frame)
+            
+            if jpeg_bytes:
+                self.frame_count += 1
+                self.last_frame_time = time.time()
+                yield jpeg_bytes
+            
+            # Control frame rate
+            time.sleep(1.0 / self.fps)
     
-    def get_frame_jpeg(self, quality: Optional[int] = None) -> Optional[bytes]:
-        """Get single frame as JPEG bytes.
-        
-        Args:
-            quality: JPEG quality (1-100). Uses config default if None.
-        
-        Returns:
-            bytes: JPEG-encoded frame, or None if capture failed
-        """
-        frame = self.capture_frame()
-        
-        if frame is None:
-            return None
-        
-        if quality is None:
-            quality = self.camera_config.get('stream_quality', 80)
-        
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
-        success, buffer = cv2.imencode('.jpg', frame, encode_param)
-        
-        return buffer.tobytes() if success else None
+    def get_fps(self) -> float:
+        """Calculate current FPS."""
+        elapsed = time.time() - self.last_frame_time
+        if elapsed > 0:
+            return self.frame_count / elapsed
+        return 0.0
     
-    def get_resolution(self) -> Tuple[int, int]:
-        """Get current camera resolution.
-        
-        Returns:
-            Tuple[int, int]: (width, height)
-        """
-        return (self.camera_config['width'], self.camera_config['height'])
-    
-    def stop(self):
-        """Stop camera streaming."""
-        self.running = False
-        logger.info("Camera stream stopped")
+    def stop_streaming(self):
+        """Stop streaming."""
+        self.is_streaming = False
+        logger.info("Camera streaming stopped")
     
     def cleanup(self):
         """Release camera resources."""
-        logger.info("Releasing camera...")
-        self.stop()
-        
         try:
-            if self.camera_type == 'picamera2' and PICAMERA2_AVAILABLE:
-                if self.camera:
-                    self.camera.stop()
-                    self.camera.close()
-            else:
-                if self.camera:
-                    self.camera.release()
+            self.stop_streaming()
             
-            logger.info("✓ Camera released")
+            if self.camera:
+                if self.camera_type == 'opencv':
+                    self.camera.release()
+                elif self.camera_type == 'picamera2':
+                    self.camera.stop()
+            
+            logger.info("Camera resources released")
+            
         except Exception as e:
             logger.error(f"Camera cleanup error: {e}")
     
-    def __del__(self):
-        """Cleanup on object destruction."""
-        self.cleanup()
+    def test_camera(self, duration: float = 5.0):
+        """Test camera capture."""
+        logger.info(f"Testing camera for {duration} seconds...")
+        
+        start_time = time.time()
+        frame_count = 0
+        
+        while time.time() - start_time < duration:
+            frame = self.capture_frame()
+            if frame is not None:
+                frame_count += 1
+            time.sleep(0.1)
+        
+        elapsed = time.time() - start_time
+        fps = frame_count / elapsed
+        
+        logger.info(f"Camera test complete: {frame_count} frames in {elapsed:.1f}s ({fps:.1f} fps)")
+
+
+if __name__ == "__main__":
+    # Test camera streamer
+    import yaml
+    
+    logging.basicConfig(level=logging.INFO)
+    
+    with open('../config/robot_config.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+    
+    camera = CameraStreamer(config)
+    
+    try:
+        # Test camera
+        camera.test_camera(duration=5.0)
+        
+        # Save a test frame
+        frame = camera.capture_frame()
+        if frame is not None:
+            cv2.imwrite('test_frame.jpg', frame)
+            print("\nTest frame saved to test_frame.jpg")
+        
+    except KeyboardInterrupt:
+        print("\nTest interrupted")
+    finally:
+        camera.cleanup()
