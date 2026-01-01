@@ -1,0 +1,18 @@
+# Core
+flask==3.0.0
+flask-socketio==5.3.5
+python-socketio[client]==5.10.0
+PyYAML==6.0.1
+
+# Hardware
+RPi.GPIO==0.7.1
+
+# Camera
+opencv-python==4.9.0.80
+# picamera2==0.3.12  # Uncomment if using Pi Camera
+
+# LiDAR
+rplidar-roboticia==1.0.0
+
+# Audio
+PyAudio==0.2.14
