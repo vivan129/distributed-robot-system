@@ -10,7 +10,8 @@ import os
 import re
 import logging
 from typing import Dict, Tuple, Optional
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -34,24 +35,21 @@ class AIBrain:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY not found in environment variables")
         
-        # Configure Gemini
-        genai.configure(api_key=self.api_key)
+        # Initialize client with new SDK
+        self.client = genai.Client(api_key=self.api_key)
         
-        # Initialize model
+        # Model configuration
         self.model_name = self.config.get('model', 'gemini-2.0-flash-exp')
-        self.model = genai.GenerativeModel(
-            model_name=self.model_name,
-            generation_config={
-                "temperature": self.config.get('temperature', 0.7),
-                "max_output_tokens": self.config.get('max_tokens', 1024),
-            }
+        self.generation_config = types.GenerateContentConfig(
+            temperature=self.config.get('temperature', 0.7),
+            max_output_tokens=self.config.get('max_tokens', 1024),
         )
         
         # System prompt
         self.system_prompt = self.config.get('system_prompt', '')
         
-        # Chat history
-        self.chat = self.model.start_chat(history=[])
+        # Chat history (we'll maintain this manually with new SDK)
+        self.chat_history = []
         
         # Movement command patterns
         self.movement_patterns = {
@@ -78,10 +76,36 @@ class AIBrain:
             # Check for movement commands
             movement_cmd = self._extract_movement_command(user_input)
             
-            # Generate AI response
-            prompt = f"{self.system_prompt}\n\nUser: {user_input}\n\nRobot:"
-            response = self.chat.send_message(prompt)
+            # Build conversation context
+            if self.system_prompt:
+                full_prompt = f"{self.system_prompt}\n\nUser: {user_input}\n\nRobot:"
+            else:
+                full_prompt = user_input
+            
+            # Add chat history to context
+            if self.chat_history:
+                history_text = "\n".join([
+                    f"{msg['role']}: {msg['content']}" 
+                    for msg in self.chat_history[-10:]  # Last 10 messages
+                ])
+                full_prompt = f"{history_text}\n\n{full_prompt}"
+            
+            # Generate AI response using new SDK
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=full_prompt,
+                config=self.generation_config
+            )
+            
             response_text = response.text.strip()
+            
+            # Update chat history
+            self.chat_history.append({'role': 'user', 'content': user_input})
+            self.chat_history.append({'role': 'assistant', 'content': response_text})
+            
+            # Keep only last 20 messages to prevent context overflow
+            if len(self.chat_history) > 20:
+                self.chat_history = self.chat_history[-20:]
             
             logger.info(f"User: {user_input}")
             logger.info(f"Robot: {response_text}")
@@ -90,7 +114,7 @@ class AIBrain:
             return response_text, movement_cmd
             
         except Exception as e:
-            logger.error(f"Error processing input: {e}")
+            logger.error(f"Error processing input: {e}", exc_info=True)
             return "I'm having trouble processing that. Could you try again?", None
     
     def _extract_movement_command(self, text: str) -> Optional[Dict]:
@@ -152,12 +176,12 @@ class AIBrain:
     
     def reset_conversation(self):
         """Reset chat history."""
-        self.chat = self.model.start_chat(history=[])
+        self.chat_history = []
         logger.info("Conversation history reset")
     
     def get_conversation_history(self) -> list:
         """Get current conversation history."""
-        return self.chat.history
+        return self.chat_history
 
 
 if __name__ == "__main__":
