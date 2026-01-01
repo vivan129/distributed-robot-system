@@ -1,1 +1,3 @@
-"""Hardware interface modules for Raspberry Pi."""
+"""Hardware modules for Raspberry Pi robot client."""
+
+__version__ = "1.0.0"
