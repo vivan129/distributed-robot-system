@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot Face</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000;
+            overflow: hidden;
+            {% if fullscreen %}
+            cursor: none;
+            {% endif %}
+        }
+        
+        #face-canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="face-canvas" width="{{ width }}" height="{{ height }}"></canvas>
+    
+    <script>
+        const canvas = document.getElementById('face-canvas');
+        const ctx = canvas.getContext('2d');
+        const socket = io();
+        
+        // Face configuration
+        let config = {
+            width: {{ width }},
+            height: {{ height }},
+            face: {
+                eye_size: 80,
+                eye_blink_interval: 3.0,
+                mouth_width: 120,
+                mouth_height: 60
+            }
+        };
+        
+        // Animation state
+        let leftEye = { x: config.width * 0.35, y: config.height * 0.4, open: 1.0 };
+        let rightEye = { x: config.width * 0.65, y: config.height * 0.4, open: 1.0 };
+        let mouth = { y: config.height * 0.65, openness: 0.2, shape: 'neutral' };
+        let expression = 'neutral';
+        let isSpeaking = false;
+        let lastBlinkTime = Date.now();
+        
+        // Socket events
+        socket.on('config', (data) => {
+            config = { ...config, ...data };
+            console.log('Received config:', config);
+        });
+        
+        socket.on('animate', (data) => {
+            console.log('Animation:', data);
+            if (data.eyes) {
+                leftEye.open = data.eyes.left || 1.0;
+                rightEye.open = data.eyes.right || 1.0;
+            }
+            if (data.mouth) {
+                mouth.openness = data.mouth.openness || 0.2;
+                mouth.shape = data.mouth.shape || 'neutral';
+            }
+        });
+        
+        socket.on('start_speaking', (data) => {
+            isSpeaking = true;
+            console.log('Started speaking');
+        });
+        
+        socket.on('stop_speaking', () => {
+            isSpeaking = false;
+            mouth.openness = 0.2;
+            console.log('Stopped speaking');
+        });
+        
+        socket.on('set_expression', (data) => {
+            expression = data.expression;
+            console.log('Expression:', expression);
+            applyExpression(expression);
+        });
+        
+        // Drawing functions
+        function drawEye(x, y, openness) {
+            const size = config.face.eye_size;
+            
+            ctx.fillStyle = '#FFFFFF';
+            ctx.beginPath();
+            ctx.ellipse(x, y, size, size * openness, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Pupil
+            ctx.fillStyle = '#000000';
+            ctx.beginPath();
+            ctx.arc(x, y, size * 0.4 * openness, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Highlight
+            ctx.fillStyle = '#FFFFFF';
+            ctx.beginPath();
+            ctx.arc(x + size * 0.15, y - size * 0.15 * openness, size * 0.15, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        function drawMouth(openness, shape) {
+            const centerX = config.width / 2;
+            const centerY = mouth.y;
+            const width = config.face.mouth_width;
+            const height = config.face.mouth_height * openness;
+            
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 8;
+            ctx.lineCap = 'round';
+            
+            ctx.beginPath();
+            
+            if (shape === 'happy' || (isSpeaking && openness > 0.5)) {
+                // Smile
+                ctx.arc(centerX, centerY - height, width, 0.3, Math.PI - 0.3);
+            } else if (shape === 'sad') {
+                // Frown
+                ctx.arc(centerX, centerY + height * 2, width, Math.PI + 0.3, -0.3);
+            } else if (shape === 'surprised') {
+                // O shape
+                ctx.ellipse(centerX, centerY, width * 0.4, height, 0, 0, Math.PI * 2);
+            } else {
+                // Neutral line
+                ctx.moveTo(centerX - width / 2, centerY);
+                ctx.quadraticCurveTo(centerX, centerY + height, centerX + width / 2, centerY);
+            }
+            
+            ctx.stroke();
+        }
+        
+        function applyExpression(expr) {
+            switch(expr) {
+                case 'happy':
+                    mouth.shape = 'happy';
+                    mouth.openness = 0.4;
+                    break;
+                case 'sad':
+                    mouth.shape = 'sad';
+                    mouth.openness = 0.3;
+                    leftEye.open = 0.7;
+                    rightEye.open = 0.7;
+                    break;
+                case 'surprised':
+                    mouth.shape = 'surprised';
+                    mouth.openness = 0.8;
+                    leftEye.open = 1.2;
+                    rightEye.open = 1.2;
+                    break;
+                default:
+                    mouth.shape = 'neutral';
+                    mouth.openness = 0.2;
+                    leftEye.open = 1.0;
+                    rightEye.open = 1.0;
+            }
+        }
+        
+        // Blinking animation
+        function updateBlink() {
+            const now = Date.now();
+            const timeSinceLastBlink = (now - lastBlinkTime) / 1000;
+            
+            if (timeSinceLastBlink > config.face.eye_blink_interval) {
+                // Blink
+                leftEye.open = 0.1;
+                rightEye.open = 0.1;
+                
+                setTimeout(() => {
+                    leftEye.open = 1.0;
+                    rightEye.open = 1.0;
+                }, 150);
+                
+                lastBlinkTime = now;
+            }
+        }
+        
+        // Speaking animation
+        function updateSpeaking() {
+            if (isSpeaking) {
+                // Animate mouth while speaking
+                mouth.openness = 0.3 + Math.random() * 0.4;
+            } else {
+                // Smooth return to neutral
+                mouth.openness += (0.2 - mouth.openness) * 0.1;
+            }
+        }
+        
+        // Main animation loop
+        function animate() {
+            // Clear canvas
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, config.width, config.height);
+            
+            // Update animations
+            updateBlink();
+            updateSpeaking();
+            
+            // Draw face
+            drawEye(leftEye.x, leftEye.y, leftEye.open);
+            drawEye(rightEye.x, rightEye.y, rightEye.open);
+            drawMouth(mouth.openness, mouth.shape);
+            
+            requestAnimationFrame(animate);
+        }
+        
+        // Start animation
+        animate();
+        console.log('Face display started');
+    </script>
+</body>
+</html>
