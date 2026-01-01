@@ -1,176 +1,144 @@
 #!/usr/bin/env python3
 """
-Camera Streamer Module
-Handles camera capture and streaming to PC server
+Camera Streamer Module - Video Streaming
+
+Streams camera frames to PC server.
+Supports OpenCV and Picamera2 backends.
 """
 
 import logging
 import cv2
 import numpy as np
+from typing import Generator, Optional
 import asyncio
-from typing import Dict, Optional, AsyncGenerator
-import time
 
 logger = logging.getLogger(__name__)
 
+
 class CameraStreamer:
-    """Camera capture and streaming."""
+    """Camera frame streamer."""
     
-    def __init__(self, config: Dict):
-        """Initialize camera streamer.
+    def __init__(self, config: dict):
+        """
+        Initialize camera streamer.
         
         Args:
-            config: Configuration dictionary from robot_config.yaml
+            config: Configuration dictionary with camera settings
         """
-        self.config = config
-        self.camera_config = config.get('camera', {})
-        
-        self.camera_type = self.camera_config.get('type', 'opencv')
-        self.width = self.camera_config.get('width', 640)
-        self.height = self.camera_config.get('height', 480)
-        self.fps = self.camera_config.get('fps', 30)
-        self.quality = self.camera_config.get('stream_quality', 85)
+        camera_config = config.get('camera', {})
+        self.camera_type = camera_config.get('type', 'opencv')
+        self.width = camera_config.get('width', 640)
+        self.height = camera_config.get('height', 480)
+        self.fps = camera_config.get('fps', 30)
+        self.quality = camera_config.get('stream_quality', 80)
         
         self.camera = None
         self.is_streaming = False
-        self.frame_count = 0
-        self.last_frame_time = time.time()
         
-        self._init_camera()
+        self._initialize_camera()
     
-    def _init_camera(self):
+    def _initialize_camera(self):
         """Initialize camera based on type."""
         try:
             if self.camera_type == 'opencv':
-                device_id = self.camera_config.get('device_id', 0)
-                self.camera = cv2.VideoCapture(device_id)
-                
-                # Set resolution
-                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-                self.camera.set(cv2.CAP_PROP_FPS, self.fps)
-                
-                if not self.camera.isOpened():
-                    raise RuntimeError("Failed to open camera")
-                
-                logger.info(f"OpenCV camera initialized: {self.width}x{self.height} @ {self.fps}fps")
-            
+                self._init_opencv()
             elif self.camera_type == 'picamera2':
-                try:
-                    from picamera2 import Picamera2
-                    self.camera = Picamera2()
-                    config = self.camera.create_preview_configuration(
-                        main={"size": (self.width, self.height)}
-                    )
-                    self.camera.configure(config)
-                    self.camera.start()
-                    logger.info(f"Picamera2 initialized: {self.width}x{self.height}")
-                except ImportError:
-                    logger.error("Picamera2 not available, falling back to OpenCV")
-                    self.camera_type = 'opencv'
-                    self._init_camera()
+                self._init_picamera2()
+            else:
+                raise ValueError(f"Unknown camera type: {self.camera_type}")
             
+            logger.info(f"Camera initialized: {self.camera_type} ({self.width}x{self.height})")
+        
         except Exception as e:
-            logger.error(f"Camera initialization error: {e}")
+            logger.error(f"Camera initialization failed: {e}")
             raise
     
-    def capture_frame(self) -> Optional[np.ndarray]:
-        """Capture a single frame.
+    def _init_opencv(self):
+        """Initialize OpenCV camera."""
+        self.camera = cv2.VideoCapture(0)
         
-        Returns:
-            Frame as numpy array or None
-        """
+        if not self.camera.isOpened():
+            raise RuntimeError("Failed to open camera")
+        
+        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        self.camera.set(cv2.CAP_PROP_FPS, self.fps)
+    
+    def _init_picamera2(self):
+        """Initialize Picamera2."""
+        try:
+            from picamera2 import Picamera2
+            
+            self.camera = Picamera2()
+            config = self.camera.create_preview_configuration(
+                main={"size": (self.width, self.height)}
+            )
+            self.camera.configure(config)
+            self.camera.start()
+        
+        except ImportError:
+            raise RuntimeError("Picamera2 not installed")
+    
+    def capture_frame(self) -> Optional[np.ndarray]:
+        """Capture single frame."""
         try:
             if self.camera_type == 'opencv':
                 ret, frame = self.camera.read()
-                if not ret:
-                    logger.warning("Failed to capture frame")
-                    return None
-                return frame
+                return frame if ret else None
             
             elif self.camera_type == 'picamera2':
                 frame = self.camera.capture_array()
-                return frame
-            
+                return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        
         except Exception as e:
             logger.error(f"Frame capture error: {e}")
             return None
     
-    def encode_frame_jpeg(self, frame: np.ndarray) -> Optional[bytes]:
-        """Encode frame as JPEG.
+    def get_jpeg_frame(self) -> Optional[bytes]:
+        """Get frame as JPEG bytes."""
+        frame = self.capture_frame()
         
-        Args:
-            frame: Frame as numpy array
+        if frame is None:
+            return None
         
-        Returns:
-            JPEG bytes or None
-        """
         try:
-            _, buffer = cv2.imencode(
-                '.jpg',
-                frame,
-                [cv2.IMWRITE_JPEG_QUALITY, self.quality]
-            )
+            _, buffer = cv2.imencode('.jpg', frame, 
+                                    [cv2.IMWRITE_JPEG_QUALITY, self.quality])
             return buffer.tobytes()
+        
         except Exception as e:
-            logger.error(f"Frame encoding error: {e}")
+            logger.error(f"JPEG encoding error: {e}")
             return None
     
-    async def stream(self) -> AsyncGenerator[Dict, None]:
-        """Stream frames asynchronously.
-        
-        Yields:
-            Dictionary with frame data and metadata
-        """
+    async def stream_frames(self, callback) -> None:
+        """Stream frames asynchronously."""
         self.is_streaming = True
-        logger.info("Camera streaming started")
+        frame_delay = 1.0 / self.fps
         
-        while self.is_streaming:
-            try:
-                # Capture frame
-                frame = self.capture_frame()
-                if frame is None:
-                    await asyncio.sleep(0.1)
-                    continue
-                
-                # Encode as JPEG
-                jpeg_bytes = self.encode_frame_jpeg(frame)
-                if jpeg_bytes is None:
-                    continue
-                
-                # Calculate FPS
-                current_time = time.time()
-                fps = 1.0 / (current_time - self.last_frame_time) if self.last_frame_time else 0
-                self.last_frame_time = current_time
-                self.frame_count += 1
-                
-                # Yield frame data
-                yield {
-                    'frame': jpeg_bytes,
-                    'timestamp': current_time,
-                    'frame_number': self.frame_count,
-                    'fps': fps,
-                    'width': self.width,
-                    'height': self.height
-                }
-                
-                # Control frame rate
-                await asyncio.sleep(1.0 / self.fps)
-                
-            except Exception as e:
-                logger.error(f"Streaming error: {e}")
-                await asyncio.sleep(0.1)
+        logger.info(f"Started streaming at {self.fps} FPS")
         
-        logger.info("Camera streaming stopped")
+        try:
+            while self.is_streaming:
+                frame_data = self.get_jpeg_frame()
+                
+                if frame_data:
+                    await callback(frame_data)
+                
+                await asyncio.sleep(frame_delay)
+        
+        except Exception as e:
+            logger.error(f"Streaming error: {e}")
+        
+        finally:
+            logger.info("Stopped streaming")
     
     def stop_streaming(self):
-        """Stop camera streaming."""
+        """Stop streaming."""
         self.is_streaming = False
     
     def release(self):
         """Release camera resources."""
         try:
-            logger.info("Releasing camera...")
             self.stop_streaming()
             
             if self.camera_type == 'opencv' and self.camera:
@@ -179,46 +147,44 @@ class CameraStreamer:
                 self.camera.stop()
             
             logger.info("Camera released")
+        
         except Exception as e:
             logger.error(f"Camera release error: {e}")
-    
-    def get_status(self) -> Dict:
-        """Get camera status.
-        
-        Returns:
-            Status dictionary
-        """
-        return {
-            'is_streaming': self.is_streaming,
-            'camera_type': self.camera_type,
-            'resolution': f"{self.width}x{self.height}",
-            'fps': self.fps,
-            'frame_count': self.frame_count
-        }
 
 
 if __name__ == "__main__":
     # Test camera streamer
     import yaml
+    import time
     
     logging.basicConfig(level=logging.INFO)
     
-    with open('../config/robot_config.yaml') as f:
+    # Load config
+    with open('../../config/robot_config.yaml', 'r') as f:
         config = yaml.safe_load(f)
     
+    # Initialize camera
     camera = CameraStreamer(config)
     
+    print("\n" + "="*60)
+    print("CAMERA STREAMER TEST")
+    print("="*60 + "\n")
+    
     try:
-        print("\nCapturing 10 frames...")
-        for i in range(10):
-            frame = camera.capture_frame()
-            if frame is not None:
-                print(f"Frame {i+1}: {frame.shape}")
+        print("Capturing test frames...\n")
+        
+        for i in range(5):
+            frame_data = camera.get_jpeg_frame()
+            if frame_data:
+                print(f"Frame {i+1}: {len(frame_data)} bytes")
+            else:
+                print(f"Frame {i+1}: Failed")
             time.sleep(0.5)
         
         print("\nTest complete!")
-        
+    
     except KeyboardInterrupt:
-        print("\nInterrupted by user")
+        print("\nTest interrupted")
+    
     finally:
         camera.release()

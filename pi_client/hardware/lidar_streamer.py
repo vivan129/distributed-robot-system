@@ -1,168 +1,142 @@
 #!/usr/bin/env python3
 """
-LiDAR Streamer Module
-Handles RP-LIDAR A1 data capture and streaming
+LiDAR Streamer Module - RP-LIDAR A1 Data Streaming
+
+Streams LiDAR scan data to PC for SLAM processing.
+Handles RP-LIDAR A1 connection and data collection.
 """
 
 import logging
 import asyncio
-from typing import Dict, AsyncGenerator, Optional
-import time
-
-try:
-    from rplidar import RPLidar
-    RPLIDAR_AVAILABLE = True
-except ImportError:
-    RPLIDAR_AVAILABLE = False
-    logging.warning("rplidar library not available")
+from typing import List, Tuple, Optional
+from rplidar import RPLidar
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
+
 class LiDARStreamer:
-    """RP-LIDAR A1 data streaming."""
+    """RP-LIDAR A1 data streamer."""
     
-    def __init__(self, config: Dict):
-        """Initialize LiDAR streamer.
+    def __init__(self, config: dict):
+        """
+        Initialize LiDAR streamer.
         
         Args:
-            config: Configuration dictionary from robot_config.yaml
+            config: Configuration dictionary with LiDAR settings
         """
-        self.config = config
-        self.lidar_config = config.get('lidar', {})
-        
-        if not RPLIDAR_AVAILABLE:
-            raise RuntimeError("rplidar library not installed. Install with: pip install rplidar-roboticia")
-        
-        self.port = self.lidar_config.get('port', '/dev/ttyUSB0')
-        self.baudrate = self.lidar_config.get('baudrate', 115200)
-        self.timeout = self.lidar_config.get('timeout', 1.0)
+        lidar_config = config.get('lidar', {})
+        self.port = lidar_config.get('port', '/dev/ttyUSB0')
+        self.baudrate = lidar_config.get('baudrate', 115200)
+        self.max_distance = lidar_config.get('max_distance', 12.0)
+        self.min_distance = lidar_config.get('min_distance', 0.15)
         
         self.lidar = None
         self.is_streaming = False
-        self.scan_count = 0
         
-        self._connect()
+        self._initialize_lidar()
     
-    def _connect(self):
-        """Connect to LiDAR."""
+    def _initialize_lidar(self):
+        """Initialize LiDAR connection."""
         try:
-            logger.info(f"Connecting to RP-LIDAR on {self.port}...")
-            self.lidar = RPLidar(self.port, baudrate=self.baudrate, timeout=self.timeout)
+            self.lidar = RPLidar(self.port, baudrate=self.baudrate)
             
             # Get device info
             info = self.lidar.get_info()
             health = self.lidar.get_health()
             
-            logger.info(f"LiDAR connected:")
-            logger.info(f"  Model: {info['model']}")
-            logger.info(f"  Firmware: {info['firmware'][0]}.{info['firmware'][1]}")
-            logger.info(f"  Hardware: {info['hardware']}")
-            logger.info(f"  Health: {health[0]}")
-            
+            logger.info(f"LiDAR connected: {self.port}")
+            logger.info(f"Model: {info['model']} S/N: {info['serialnumber']}")
+            logger.info(f"Health: {health}")
+        
         except Exception as e:
-            logger.error(f"LiDAR connection error: {e}")
+            logger.error(f"LiDAR initialization failed: {e}")
             raise
     
-    async def stream(self) -> AsyncGenerator[Dict, None]:
-        """Stream LiDAR scans asynchronously.
-        
-        Yields:
-            Dictionary with scan data and metadata
+    def get_single_scan(self) -> Tuple[List[float], List[float]]:
         """
-        if not self.lidar:
-            logger.error("LiDAR not connected")
-            return
+        Get single 360° scan.
         
+        Returns:
+            Tuple of (ranges, angles) in meters and degrees
+        """
+        try:
+            ranges = []
+            angles = []
+            
+            for scan in self.lidar.iter_scans():
+                for (quality, angle, distance) in scan:
+                    # Convert to meters
+                    distance_m = distance / 1000.0
+                    
+                    # Filter by range
+                    if self.min_distance <= distance_m <= self.max_distance:
+                        ranges.append(distance_m)
+                        angles.append(angle)
+                
+                # Return after one complete scan
+                break
+            
+            return ranges, angles
+        
+        except Exception as e:
+            logger.error(f"Scan error: {e}")
+            return [], []
+    
+    async def stream_scans(self, callback) -> None:
+        """
+        Stream scans asynchronously.
+        
+        Args:
+            callback: Async function to call with scan data
+        """
         self.is_streaming = True
-        logger.info("LiDAR streaming started")
+        logger.info("Started LiDAR streaming")
         
         try:
-            # Start motor and scanning
-            scan_mode = self.lidar_config.get('scan_mode', 'Standard')
-            
-            for scan in self.lidar.iter_scans(scan_type=scan_mode):
+            for scan in self.lidar.iter_scans():
                 if not self.is_streaming:
                     break
                 
-                # Extract ranges and angles
                 ranges = []
                 angles = []
-                qualities = []
                 
-                for quality, angle, distance in scan:
-                    ranges.append(distance / 1000.0)  # Convert mm to meters
-                    angles.append(angle)
-                    qualities.append(quality)
+                for (quality, angle, distance) in scan:
+                    distance_m = distance / 1000.0
+                    
+                    if self.min_distance <= distance_m <= self.max_distance:
+                        ranges.append(distance_m)
+                        angles.append(angle)
                 
-                self.scan_count += 1
+                # Send scan data
+                await callback({'ranges': ranges, 'angles': angles})
                 
-                # Yield scan data
-                yield {
-                    'ranges': ranges,
-                    'angles': angles,
-                    'qualities': qualities,
-                    'timestamp': time.time(),
-                    'scan_number': self.scan_count,
-                    'point_count': len(ranges)
-                }
-                
-                # Small delay to prevent overwhelming the system
+                # Small delay for CPU
                 await asyncio.sleep(0.01)
-                
-        except Exception as e:
-            logger.error(f"LiDAR streaming error: {e}")
-        finally:
-            self.stop_streaming()
         
-        logger.info("LiDAR streaming stopped")
+        except Exception as e:
+            logger.error(f"Streaming error: {e}")
+        
+        finally:
+            logger.info("Stopped LiDAR streaming")
     
     def stop_streaming(self):
-        """Stop LiDAR streaming."""
+        """Stop streaming."""
         self.is_streaming = False
-        if self.lidar:
-            try:
-                self.lidar.stop()
-                self.lidar.stop_motor()
-                logger.info("LiDAR motor stopped")
-            except Exception as e:
-                logger.warning(f"Error stopping LiDAR: {e}")
     
-    def disconnect(self):
-        """Disconnect from LiDAR."""
+    def release(self):
+        """Release LiDAR resources."""
         try:
-            logger.info("Disconnecting LiDAR...")
             self.stop_streaming()
             
             if self.lidar:
+                self.lidar.stop()
                 self.lidar.disconnect()
             
-            logger.info("LiDAR disconnected")
-        except Exception as e:
-            logger.error(f"LiDAR disconnect error: {e}")
-    
-    def get_status(self) -> Dict:
-        """Get LiDAR status.
+            logger.info("LiDAR released")
         
-        Returns:
-            Status dictionary
-        """
-        return {
-            'is_streaming': self.is_streaming,
-            'port': self.port,
-            'scan_count': self.scan_count,
-            'connected': self.lidar is not None
-        }
-    
-    def reset(self):
-        """Reset LiDAR connection."""
-        try:
-            logger.info("Resetting LiDAR...")
-            if self.lidar:
-                self.lidar.reset()
-                time.sleep(2)  # Wait for reset
-            self._connect()
         except Exception as e:
-            logger.error(f"LiDAR reset error: {e}")
+            logger.error(f"LiDAR release error: {e}")
 
 
 if __name__ == "__main__":
@@ -171,28 +145,30 @@ if __name__ == "__main__":
     
     logging.basicConfig(level=logging.INFO)
     
-    with open('../config/robot_config.yaml') as f:
+    # Load config
+    with open('../../config/robot_config.yaml', 'r') as f:
         config = yaml.safe_load(f)
     
+    # Initialize LiDAR
     lidar = LiDARStreamer(config)
     
-    async def test():
-        print("\nCapturing 5 scans...")
-        scan_num = 0
+    print("\n" + "="*60)
+    print("LIDAR STREAMER TEST")
+    print("="*60 + "\n")
+    
+    try:
+        print("Capturing test scans...\n")
         
-        async for scan_data in lidar.stream():
-            scan_num += 1
-            print(f"Scan {scan_num}: {scan_data['point_count']} points")
-            
-            if scan_num >= 5:
-                lidar.stop_streaming()
-                break
+        for i in range(3):
+            ranges, angles = lidar.get_single_scan()
+            print(f"Scan {i+1}: {len(ranges)} points")
+            if ranges:
+                print(f"  Range: {min(ranges):.2f}m - {max(ranges):.2f}m")
         
         print("\nTest complete!")
     
-    try:
-        asyncio.run(test())
     except KeyboardInterrupt:
-        print("\nInterrupted by user")
+        print("\nTest interrupted")
+    
     finally:
-        lidar.disconnect()
+        lidar.release()
