@@ -1,260 +1,98 @@
-# ============================================================================
-# SLAM Configuration
-# ============================================================================
-# Configuration for Simultaneous Localization and Mapping using RP-LIDAR A1
+# ============================================================
+# DISTRIBUTED ROBOT SYSTEM - SLAM CONFIGURATION
+# ============================================================
 
 # Map Configuration
-# ============================================================================
 map:
-  # Grid map dimensions
-  width: 2000                      # pixels
-  height: 2000                     # pixels
-  resolution: 0.05                 # meters per pixel (5cm)
-  
-  # Map bounds (meters)
-  bounds:
-    x_min: -50.0
-    x_max: 50.0
-    y_min: -50.0
-    y_max: 50.0
-  
-  # Initial robot position (map center)
-  origin:
-    x: 1000                        # pixels
-    y: 1000                        # pixels
-    theta: 0.0                     # radians
-
-# Occupancy Grid Settings
-# ============================================================================
-occupancy:
-  # Probability values
-  free_threshold: 0.3              # Cells below this are free
-  occupied_threshold: 0.7          # Cells above this are occupied
-  unknown_value: 0.5               # Initial/unknown cell value
-  
-  # Update parameters
-  hit_probability: 0.7             # P(occupied | hit)
-  miss_probability: 0.3            # P(occupied | miss)
-  
-  # Log-odds updates
-  log_odds_hit: 0.4                # Increase when hit
-  log_odds_miss: -0.4              # Decrease when miss
-  log_odds_max: 3.5                # Maximum log-odds value
-  log_odds_min: -3.5               # Minimum log-odds value
+  resolution: 0.05            # meters per pixel (5cm)
+  width: 2000                 # pixels (100m at 0.05 resolution)
+  height: 2000                # pixels
+  origin: [1000, 1000]        # Starting position (center)
+  unknown_value: 128          # Gray (0=free, 255=occupied, 128=unknown)
+  free_threshold: 0.196       # Probability threshold for free
+  occupied_threshold: 0.65    # Probability threshold for occupied
 
 # LiDAR Processing
-# ============================================================================
 lidar:
-  # Range filtering
-  range_min: 0.15                  # meters - ignore closer readings
-  range_max: 12.0                  # meters - ignore farther readings
-  
-  # Angle filtering
-  angle_min: 0                     # degrees
-  angle_max: 360                   # degrees
-  angle_resolution: 1.0            # degrees
-  
-  # Quality filtering
-  quality_threshold: 10            # Minimum scan quality (0-15)
-  
-  # Outlier removal
-  outlier_removal:
+  range_min: 0.15             # meters (15cm)
+  range_max: 12.0             # meters
+  angle_min: 0                # degrees
+  angle_max: 360              # degrees
+  angle_increment: 1.0        # degrees
+  scan_decimation: 2          # Process every Nth point (reduce computation)
+  outlier_filter:
     enabled: true
-    radius: 0.1                    # meters
-    min_neighbors: 2               # Minimum points in radius
-  
-  # Noise reduction
-  median_filter:
-    enabled: true
-    window_size: 5                 # Number of samples
+    window_size: 5            # Moving window for outlier detection
+    threshold: 0.1            # Meters - max deviation from median
 
-# Localization
-# ============================================================================
+# Grid Mapping Algorithm
+grid_mapping:
+  algorithm: "log_odds"       # "log_odds" or "counting"
+  update_rate: 10             # Hz - how often to update map
+  hit_probability: 0.7        # P(occupied | hit)
+  miss_probability: 0.3       # P(occupied | miss)
+  log_odds_hit: 0.85          # Log odds for hit
+  log_odds_miss: -0.4         # Log odds for miss
+  max_log_odds: 3.5           # Clamp maximum
+  min_log_odds: -3.5          # Clamp minimum
+  
+# Localization (Particle Filter)
 localization:
-  # Update frequency
-  update_rate: 10                  # Hz
-  
-  # Odometry model
-  odometry:
-    enabled: false                 # Use wheel encoders if available
-    alpha1: 0.1                    # Rotation noise from rotation
-    alpha2: 0.1                    # Rotation noise from translation
-    alpha3: 0.1                    # Translation noise from translation
-    alpha4: 0.1                    # Translation noise from rotation
-  
-  # Scan matching
-  scan_matching:
-    method: "icp"                  # icp, ndt, correlative
-    max_iterations: 50
-    convergence_threshold: 0.001   # meters
-    max_correspondence_distance: 0.5  # meters
+  enabled: true
+  num_particles: 100          # Number of particles
+  resample_threshold: 0.5     # Effective particle ratio
+  initial_pose:
+    x: 0.0                    # meters
+    y: 0.0                    # meters
+    theta: 0.0                # radians
+  uncertainty:
+    x: 0.5                    # meters
+    y: 0.5                    # meters
+    theta: 0.3                # radians
 
-# Particle Filter (if using)
-# ============================================================================
-particle_filter:
-  enabled: false
-  num_particles: 500
-  
-  # Resampling
-  resample_threshold: 0.5          # Effective sample size ratio
-  
-  # Noise parameters
-  motion_noise:
-    translation: 0.1               # meters
-    rotation: 0.05                 # radians
-  
-  measurement_noise:
-    range: 0.1                     # meters
-    angle: 0.05                    # radians
+# Motion Model (for odometry)
+motion_model:
+  alpha1: 0.2                 # Rotation noise from rotation
+  alpha2: 0.2                 # Rotation noise from translation
+  alpha3: 0.2                 # Translation noise from translation
+  alpha4: 0.2                 # Translation noise from rotation
 
-# Mapping Algorithm
-# ============================================================================
-mapping:
-  # Algorithm type
-  algorithm: "bresenham"           # bresenham, dda, ray_tracing
-  
-  # Ray tracing parameters
-  ray_tracing:
-    step_size: 0.01                # meters
-    max_range: 12.0                # meters
-  
-  # Update strategy
-  update_strategy: "incremental"  # incremental, batch
-  
-  # Map management
-  map_expansion:
-    enabled: true
-    expansion_threshold: 0.9       # Expand when 90% full
-    expansion_size: 500            # pixels to add
-
-# Loop Closure Detection
-# ============================================================================
-loop_closure:
-  enabled: false                   # Requires more advanced SLAM
-  
-  # Detection parameters
-  min_distance: 5.0                # meters - minimum distance between poses
-  max_distance: 2.0                # meters - maximum distance for closure
-  angle_threshold: 0.5             # radians
-  
-  # Verification
-  min_matches: 10                  # Minimum feature matches
-  ransac_iterations: 100
+# Sensor Model (LiDAR)
+sensor_model:
+  z_hit: 0.95                 # Weight for correct range
+  z_short: 0.01               # Weight for short range (obstacles)
+  z_max: 0.01                 # Weight for max range
+  z_rand: 0.03                # Weight for random noise
+  sigma_hit: 0.1              # Standard deviation for hit
+  lambda_short: 0.1           # Decay parameter for short readings
 
 # Path Planning
-# ============================================================================
 path_planning:
-  # Algorithm
-  algorithm: "a_star"              # a_star, dijkstra, rrt
-  
-  # A* parameters
-  heuristic: "euclidean"           # euclidean, manhattan, diagonal
-  diagonal_cost: 1.414             # Cost for diagonal movement
-  
-  # Safety margins
-  robot_radius: 0.3                # meters - inflation radius
-  safety_margin: 0.1               # meters - additional clearance
-  
-  # Path smoothing
-  smoothing:
-    enabled: true
-    method: "bezier"               # bezier, spline, gradient_descent
-    iterations: 10
+  algorithm: "a_star"         # "a_star" or "rrt"
+  goal_tolerance: 0.2         # meters
+  max_iterations: 1000
+  step_size: 0.1              # meters (for RRT)
+  goal_bias: 0.1              # Probability of sampling goal
 
 # Visualization
-# ============================================================================
 visualization:
-  # Display settings
-  show_particles: false
+  enabled: true
+  update_rate: 2              # Hz
+  show_particles: true
   show_scan: true
   show_path: true
-  show_robot: true
+  colormap: "gray"            # "gray", "jet", "viridis"
   
-  # Colors (RGB 0-255)
-  colors:
-    free: [255, 255, 255]          # White
-    occupied: [0, 0, 0]            # Black
-    unknown: [128, 128, 128]       # Gray
-    robot: [255, 0, 0]             # Red
-    scan: [0, 255, 0]              # Green
-    path: [0, 0, 255]              # Blue
-  
-  # Map display
-  display_scale: 1.0               # Zoom factor
-  update_rate: 5                   # Hz - visualization refresh rate
-
-# Data Logging
-# ============================================================================
-logging:
-  # Save data
-  save_maps: true
-  save_scans: false
-  save_poses: true
-  
-  # Output directory
-  output_directory: "slam_data"
-  
-  # File formats
-  map_format: "pgm"                # pgm, png, numpy
-  metadata_format: "yaml"          # yaml, json
-  
-  # Save frequency
-  save_interval: 30                # seconds
-  auto_save: true
-
-# Performance Optimization
-# ============================================================================
+# Performance
 performance:
-  # Processing
-  multi_threading: true
-  max_threads: 2
+  async_updates: true
+  thread_count: 2
+  max_queue_size: 10          # Max queued scans
   
-  # Memory management
-  max_map_size: 1048576            # bytes (1MB) - trigger optimization
-  compress_maps: false
-  
-  # Update throttling
-  skip_frames: 0                   # Process every Nth frame (0 = all)
-  adaptive_processing: true        # Reduce rate under load
-
-# ROS Integration (Optional)
-# ============================================================================
-ros:
-  enabled: false
-  
-  # Topics
-  topics:
-    scan: "/scan"
-    map: "/map"
-    pose: "/pose"
-    path: "/path"
-  
-  # Frame IDs
-  frames:
-    map: "map"
-    odom: "odom"
-    base_link: "base_link"
-    laser: "laser"
-  
-  # Transform
-  publish_tf: true
-  tf_rate: 20                      # Hz
-
-# Advanced Features
-# ============================================================================
-advanced:
-  # Multi-floor mapping
-  multi_floor:
-    enabled: false
-    floor_height_threshold: 2.0    # meters
-  
-  # Dynamic obstacles
-  dynamic_obstacles:
-    enabled: false
-    decay_rate: 0.01               # Probability decay per update
-  
-  # Semantic mapping
-  semantic_mapping:
-    enabled: false
-    use_camera: false
-    object_recognition: false
+# Saving/Loading
+persistence:
+  auto_save: true
+  save_interval: 300          # seconds (5 minutes)
+  map_format: "pgm"           # "pgm" or "png"
+  save_directory: "maps"
+  metadata_format: "yaml"     # Save map metadata
