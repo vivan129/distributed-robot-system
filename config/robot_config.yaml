@@ -1,119 +1,235 @@
-# Robot Hardware and Network Configuration
+# ============================================================================
+# Robot Hardware Configuration
+# ============================================================================
+# This file contains all hardware-specific settings for the distributed
+# robot system including network, GPIO pins, sensors, and peripherals.
 
-# Network Settings
+# Network Configuration
+# ============================================================================
 network:
-  pc_ip: "192.168.1.100"        # Ubuntu PC static IP
-  pc_port: 5000                  # PC server port
-  pi_ip: "192.168.1.101"        # Raspberry Pi static IP
-  pi_display_port: 8080          # Pi face display port
-  socketio_timeout: 30           # Connection timeout (seconds)
+  # PC Server (Ubuntu)
+  pc_ip: "192.168.1.100"          # Change to your PC's static IP
+  pc_port: 5000                    # Flask server port
+  
+  # Raspberry Pi Client
+  pi_ip: "192.168.1.101"          # Change to your Pi's static IP
+  pi_display_port: 8080            # Face display server port
+  
+  # Connection settings
+  reconnect_delay: 5               # Seconds between connection attempts
+  timeout: 30                      # Socket timeout in seconds
 
 # Motor Configuration (GPIO BOARD numbering)
-motor:
+# ============================================================================
+motors:
+  # Pin assignments
   pins:
-    L1: 33    # Left motor forward
-    L2: 38    # Left motor backward
-    R1: 35    # Right motor forward
-    R2: 40    # Right motor backward
-  pwm_frequency: 1000            # PWM frequency in Hz
-  default_speed: 70              # Default motor speed (0-100%)
-  turn_speed: 60                 # Speed during turns
+    L1: 33    # Left motor forward (GPIO 13)
+    L2: 38    # Left motor backward (GPIO 20)
+    R1: 35    # Right motor forward (GPIO 19)
+    R2: 40    # Right motor backward (GPIO 21)
   
-# Relay Configuration (Optional)
-relay:
-  enabled: false
-  pins:
-    relay1: 15
-    relay2: 16
-    relay3: 18
-    relay4: 22
+  # Motor characteristics
+  pwm_frequency: 100               # Hz
+  default_speed: 75                # 0-100%
+  acceleration_rate: 10            # Speed change per 100ms
+  
+  # Safety settings
+  emergency_stop_enabled: true
+  motor_timeout: 10                # Auto-stop after seconds of inactivity
+  cleanup_on_exit: true            # Ensure GPIO cleanup
 
-# Camera Settings
+# Relay Configuration (Optional)
+# ============================================================================
+relays:
+  enabled: false                   # Set to true if using relays
+  pins:
+    relay1: 15    # GPIO 22
+    relay2: 16    # GPIO 23
+    relay3: 18    # GPIO 24
+    relay4: 22    # GPIO 25
+
+# Camera Configuration
+# ============================================================================
 camera:
-  type: "opencv"                 # Options: "opencv", "picamera2"
-  device_index: 0                # Camera device index
+  # Camera type: "opencv", "picamera2", or "usb"
+  type: "opencv"
+  
+  # Resolution
   width: 640
   height: 480
   fps: 30
-  flip_horizontal: false
-  flip_vertical: false
-  stream_quality: 80             # JPEG quality (1-100)
+  
+  # Streaming settings
+  stream_quality: 85               # JPEG quality (0-100)
+  stream_fps: 20                   # Streaming frame rate
+  
+  # Processing
+  auto_exposure: true
+  auto_white_balance: true
+  rotation: 0                      # 0, 90, 180, 270
 
-# LiDAR Settings
+# LiDAR Configuration
+# ============================================================================
 lidar:
+  # RP-LIDAR A1 settings
   enabled: true
-  port: "/dev/ttyUSB0"
+  port: "/dev/ttyUSB0"            # USB serial port
   baudrate: 115200
-  scan_mode: "Standard"          # Standard, Express, Boost
-  max_distance: 12.0             # meters
-  min_distance: 0.15             # meters
-  angle_min: 0                   # degrees
-  angle_max: 360                 # degrees
+  
+  # Scanning parameters
+  scan_mode: "Standard"            # Standard, Express, Boost
+  motor_speed: 660                 # RPM (600-1023)
+  
+  # Data filtering
+  range_min: 0.15                  # Minimum valid range (meters)
+  range_max: 12.0                  # Maximum valid range (meters)
+  angle_min: 0                     # Degrees
+  angle_max: 360                   # Degrees
+  
+  # Performance
+  sample_rate: 8000                # Samples per second
+  stream_rate: 10                  # Scans per second to PC
 
-# Ultrasonic Sensor Settings
+# Ultrasonic Sensor Configuration
+# ============================================================================
 ultrasonic:
   enabled: true
-  trigger_pin: 11                # GPIO BOARD numbering
-  echo_pin: 13
-  max_distance: 400              # cm
-  measurement_timeout: 0.05      # seconds
-
-# Safety Settings
-safety:
-  obstacle_threshold: 30         # Stop distance in cm
-  emergency_stop_enabled: true
-  motor_timeout: 10              # Auto-stop after seconds of inactivity
-  max_continuous_run: 60         # Max seconds motors can run continuously
-
-# Audio Settings
-audio:
-  input_device: null             # null = default microphone
-  output_device: null            # null = default speaker
-  sample_rate: 16000
-  channels: 1
-  chunk_size: 1024
-
-# Face Display Settings
-display:
-  width: 1280                    # Display resolution width
-  height: 800                    # Display resolution height
-  fullscreen: true
-  fps: 60
+  trigger_pin: 11                  # GPIO 17
+  echo_pin: 13                     # GPIO 27
   
-  # Face animation parameters
-  face:
-    eye_blink_interval: 3.0      # Average seconds between blinks
-    eye_size: 80                 # Pixel size
-    mouth_width: 120
-    mouth_height: 60
-    animation_smoothing: 0.3     # 0-1, higher = smoother
+  # Measurement settings
+  max_distance: 400                # cm
+  measurement_interval: 0.1        # Seconds between readings
+  timeout: 0.05                    # Echo timeout (seconds)
+  
+  # Safety
+  obstacle_threshold: 30           # cm - trigger emergency stop
 
-# AI Settings
+# Display Configuration
+# ============================================================================
+display:
+  # Display type
+  type: "touch_lcd"                # touch_lcd, hdmi, none
+  resolution:
+    width: 1024
+    height: 600
+  
+  # Face animation settings
+  fps: 60
+  eye_size: 80                     # pixels
+  mouth_width: 120                 # pixels
+  blink_interval: 3                # Average seconds between blinks
+  
+  # Colors (RGB)
+  background_color: [0, 0, 0]      # Black
+  eye_color: [255, 255, 255]       # White
+  mouth_color: [255, 100, 100]     # Red
+
+# Audio Configuration
+# ============================================================================
+audio:
+  # Microphone
+  microphone:
+    enabled: true
+    device_index: 0                # Use default device
+    sample_rate: 16000             # Hz
+    channels: 1                    # Mono
+    chunk_size: 1024               # Samples per buffer
+    
+    # Voice Activity Detection
+    vad_enabled: true
+    silence_threshold: 500         # Amplitude threshold
+    silence_duration: 1.5          # Seconds of silence before stopping
+  
+  # Speakers
+  speakers:
+    enabled: true
+    device_index: 0                # Use default device
+    volume: 80                     # 0-100%
+    player: "mpg123"               # mpg123, pygame, pyaudio
+
+# AI Configuration
+# ============================================================================
 ai:
+  # Google Gemini
   model: "gemini-2.0-flash-exp"
-  max_tokens: 1000
   temperature: 0.7
-  system_prompt: |
-    You are a helpful robot assistant. You can control your movement and respond to queries.
-    When user asks you to move, respond with movement commands like:
-    - "forward:<seconds>" for moving forward
-    - "backward:<seconds>" for moving backward
-    - "left" for turning left
-    - "right" for turning right
-    - "stop" to stop all movement
-    Keep responses concise and friendly.
+  max_tokens: 1024
+  
+  # Voice Recognition
+  speech_recognition:
+    engine: "google"               # google, whisper, sphinx
+    language: "en-IN"              # Indian English
+    timeout: 5                     # Listening timeout
+    phrase_time_limit: 10          # Max phrase length
+  
+  # Text-to-Speech
+  tts:
+    engine: "edge"                 # edge, gtts, pyttsx3
+    voice: "en-IN-NeerjaNeural"    # Indian English female voice
+    rate: "+0%"                    # Speed modifier
+    volume: "+0%"                  # Volume modifier
 
-# TTS Settings
-tts:
-  voice: "en-IN-NeerjaNeural"    # Indian English voice
-  rate: "+0%"                     # Speech rate
-  volume: "+0%"                   # Volume
-  pitch: "+0Hz"                   # Pitch
+# Safety Configuration
+# ============================================================================
+safety:
+  # Emergency stop conditions
+  emergency_stop:
+    obstacle_distance: 30          # cm
+    timeout_enabled: true
+    connection_loss_stop: true     # Stop if PC disconnects
+  
+  # System monitoring
+  monitoring:
+    cpu_threshold: 85              # % - throttle if exceeded
+    temperature_threshold: 80      # °C - Pi CPU temp
+    memory_threshold: 90           # % - RAM usage
+  
+  # Watchdog
+  watchdog:
+    enabled: true
+    interval: 5                    # Seconds - heartbeat interval
+    timeout: 15                    # Seconds - restart if no heartbeat
 
-# Logging Settings
+# Logging Configuration
+# ============================================================================
 logging:
-  level: "INFO"                   # DEBUG, INFO, WARNING, ERROR
-  log_to_file: true
-  log_file: "robot.log"
-  max_file_size: 10485760         # 10MB
-  backup_count: 3
+  level: "INFO"                    # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  console_output: true
+  file_output: true
+  log_directory: "logs"
+  max_file_size: 10485760          # 10 MB
+  backup_count: 5
+  
+  # Module-specific logging
+  modules:
+    motors: "DEBUG"
+    camera: "INFO"
+    lidar: "INFO"
+    ai: "INFO"
+    network: "INFO"
+
+# Performance Tuning
+# ============================================================================
+performance:
+  # Threading
+  max_threads: 4
+  
+  # Buffer sizes
+  camera_buffer_size: 2
+  lidar_buffer_size: 10
+  audio_buffer_size: 5
+  
+  # Update rates (Hz)
+  sensor_update_rate: 20
+  motor_update_rate: 50
+  display_update_rate: 60
+
+# Development Settings
+# ============================================================================
+development:
+  debug_mode: false
+  simulate_hardware: false         # Use mock hardware for testing
+  verbose_logging: false
+  profile_performance: false
