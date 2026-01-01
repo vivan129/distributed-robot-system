@@ -1,190 +1,110 @@
 #!/usr/bin/env python3
 """
-SLAM Processor Module - Simultaneous Localization and Mapping
-
-Handles map building and robot localization using LiDAR data
-from RP-LIDAR A1.
-
-Author: Distributed Robot System
-Date: January 2026
+SLAM Processor Module
+Handles simultaneous localization and mapping from LiDAR data
 """
 
 import logging
 import numpy as np
-import cv2
 from typing import Dict, List, Tuple, Optional
-import time
+import cv2
 import os
 
 logger = logging.getLogger(__name__)
 
-
 class SLAMProcessor:
-    """SLAM processor for robot mapping and localization."""
+    """Grid-based SLAM processor for LiDAR data."""
     
     def __init__(self, config: Dict):
-        """
-        Initialize SLAM processor.
+        """Initialize SLAM processor.
         
         Args:
-            config: SLAM configuration dictionary
+            config: Configuration dictionary from slam_config.yaml
         """
         self.config = config
-        
-        # Map configuration
-        map_config = self.config.get('map', {})
-        self.map_width = map_config.get('width', 2000)
-        self.map_height = map_config.get('height', 2000)
-        self.resolution = map_config.get('resolution', 0.05)  # meters per pixel
+        self.map_config = config.get('map', {})
         
         # Initialize occupancy grid
-        self.occupancy_grid = np.ones((self.map_height, self.map_width)) * 0.5
-        self.log_odds_grid = np.zeros((self.map_height, self.map_width))
+        width = self.map_config.get('width', 2000)
+        height = self.map_config.get('height', 2000)
+        unknown = self.map_config.get('unknown_value', 128)
+        
+        self.grid = np.full((height, width), unknown, dtype=np.uint8)
+        self.log_odds_grid = np.zeros((height, width), dtype=np.float32)
         
         # Robot pose (x, y, theta)
-        origin = map_config.get('origin', {'x': 1000, 'y': 1000, 'theta': 0.0})
-        self.robot_pose = np.array([
-            origin['x'],
-            origin['y'],
-            origin['theta']
-        ])
+        origin = self.map_config.get('origin', [width // 2, height // 2])
+        self.pose = np.array([origin[0], origin[1], 0.0], dtype=np.float32)
         
-        # Occupancy parameters
-        occ_config = self.config.get('occupancy', {})
-        self.free_threshold = occ_config.get('free_threshold', 0.3)
-        self.occupied_threshold = occ_config.get('occupied_threshold', 0.7)
-        self.log_odds_hit = occ_config.get('log_odds_hit', 0.4)
-        self.log_odds_miss = occ_config.get('log_odds_miss', -0.4)
-        self.log_odds_max = occ_config.get('log_odds_max', 3.5)
-        self.log_odds_min = occ_config.get('log_odds_min', -3.5)
+        # Resolution (meters per pixel)
+        self.resolution = self.map_config.get('resolution', 0.05)
         
-        # LiDAR parameters
-        lidar_config = self.config.get('lidar', {})
-        self.range_min = lidar_config.get('range_min', 0.15)
-        self.range_max = lidar_config.get('range_max', 12.0)
+        # Log odds parameters
+        grid_config = config.get('grid_mapping', {})
+        self.log_odds_hit = grid_config.get('log_odds_hit', 0.85)
+        self.log_odds_miss = grid_config.get('log_odds_miss', -0.4)
+        self.max_log_odds = grid_config.get('max_log_odds', 3.5)
+        self.min_log_odds = grid_config.get('min_log_odds', -3.5)
         
-        # Statistics
-        self.scan_count = 0
-        self.last_update = time.time()
+        # Thresholds
+        self.free_threshold = self.map_config.get('free_threshold', 0.196)
+        self.occupied_threshold = self.map_config.get('occupied_threshold', 0.65)
         
-        logger.info(f"SLAM Processor initialized ({self.map_width}x{self.map_height}, {self.resolution}m/px)")
+        logger.info(f"SLAM processor initialized: {width}x{height} @ {self.resolution}m/pixel")
     
     def add_scan(self, ranges: List[float], angles: List[float]):
-        """
-        Add a LiDAR scan to the map.
+        """Add a LiDAR scan to the map.
         
         Args:
             ranges: List of range measurements (meters)
             angles: List of corresponding angles (degrees)
         """
-        if len(ranges) != len(angles):
-            logger.error("Ranges and angles length mismatch")
-            return
-        
-        # Filter scan data
-        filtered_ranges, filtered_angles = self._filter_scan(ranges, angles)
-        
-        if not filtered_ranges:
-            logger.warning("No valid scan points after filtering")
-            return
-        
-        # Update map
-        self._update_occupancy_grid(filtered_ranges, filtered_angles)
-        
-        self.scan_count += 1
-        self.last_update = time.time()
-        
-        if self.scan_count % 10 == 0:
-            logger.debug(f"Processed {self.scan_count} scans")
+        try:
+            # Convert to numpy arrays
+            ranges = np.array(ranges)
+            angles = np.deg2rad(angles)
+            
+            # Filter invalid ranges
+            lidar_config = self.config.get('lidar', {})
+            min_range = lidar_config.get('range_min', 0.15)
+            max_range = lidar_config.get('range_max', 12.0)
+            
+            valid = (ranges >= min_range) & (ranges <= max_range)
+            ranges = ranges[valid]
+            angles = angles[valid]
+            
+            if len(ranges) == 0:
+                return
+            
+            # Robot pose
+            x_robot, y_robot, theta_robot = self.pose
+            
+            # Convert scan to world coordinates
+            world_angles = angles + theta_robot
+            x_points = x_robot + ranges / self.resolution * np.cos(world_angles)
+            y_points = y_robot + ranges / self.resolution * np.sin(world_angles)
+            
+            # Update occupancy grid using ray tracing
+            for x_end, y_end in zip(x_points, y_points):
+                self._ray_trace_update(x_robot, y_robot, x_end, y_end)
+            
+            # Convert log odds to probability for visualization
+            self._update_grid_from_log_odds()
+            
+        except Exception as e:
+            logger.error(f"Error adding scan: {e}")
     
-    def _filter_scan(self, ranges: List[float], angles: List[float]) -> Tuple[List[float], List[float]]:
-        """
-        Filter scan data to remove invalid points.
+    def _ray_trace_update(self, x0: float, y0: float, x1: float, y1: float):
+        """Update grid along a ray using Bresenham's algorithm.
         
         Args:
-            ranges: Range measurements
-            angles: Angle measurements
-        
-        Returns:
-            Filtered (ranges, angles)
+            x0, y0: Start point (robot position)
+            x1, y1: End point (obstacle)
         """
-        filtered_ranges = []
-        filtered_angles = []
+        # Bresenham's line algorithm
+        x0, y0 = int(x0), int(y0)
+        x1, y1 = int(x1), int(y1)
         
-        for r, a in zip(ranges, angles):
-            # Check range validity
-            if self.range_min <= r <= self.range_max:
-                filtered_ranges.append(r)
-                filtered_angles.append(a)
-        
-        return filtered_ranges, filtered_angles
-    
-    def _update_occupancy_grid(self, ranges: List[float], angles: List[float]):
-        """
-        Update occupancy grid with scan data using ray tracing.
-        
-        Args:
-            ranges: Filtered range measurements
-            angles: Filtered angle measurements
-        """
-        robot_x, robot_y, robot_theta = self.robot_pose
-        
-        for range_m, angle_deg in zip(ranges, angles):
-            # Convert to radians and add robot orientation
-            angle_rad = np.radians(angle_deg) + robot_theta
-            
-            # Calculate endpoint in world coordinates
-            end_x = robot_x + (range_m / self.resolution) * np.cos(angle_rad)
-            end_y = robot_y + (range_m / self.resolution) * np.sin(angle_rad)
-            
-            # Ray trace from robot to endpoint
-            ray_points = self._bresenham_line(
-                int(robot_x), int(robot_y),
-                int(end_x), int(end_y)
-            )
-            
-            # Update cells along ray (free space)
-            for px, py in ray_points[:-1]:
-                if 0 <= px < self.map_width and 0 <= py < self.map_height:
-                    self._update_cell(py, px, is_occupied=False)
-            
-            # Update endpoint (occupied)
-            end_px, end_py = int(end_x), int(end_y)
-            if 0 <= end_px < self.map_width and 0 <= end_py < self.map_height:
-                self._update_cell(end_py, end_px, is_occupied=True)
-    
-    def _update_cell(self, row: int, col: int, is_occupied: bool):
-        """
-        Update a single grid cell using log-odds.
-        
-        Args:
-            row: Cell row
-            col: Cell column
-            is_occupied: True if obstacle detected
-        """
-        # Update log-odds
-        delta = self.log_odds_hit if is_occupied else self.log_odds_miss
-        self.log_odds_grid[row, col] = np.clip(
-            self.log_odds_grid[row, col] + delta,
-            self.log_odds_min,
-            self.log_odds_max
-        )
-        
-        # Convert to probability
-        self.occupancy_grid[row, col] = 1.0 - (1.0 / (1.0 + np.exp(self.log_odds_grid[row, col])))
-    
-    def _bresenham_line(self, x0: int, y0: int, x1: int, y1: int) -> List[Tuple[int, int]]:
-        """
-        Bresenham's line algorithm for ray tracing.
-        
-        Args:
-            x0, y0: Start point
-            x1, y1: End point
-        
-        Returns:
-            List of (x, y) points along line
-        """
-        points = []
         dx = abs(x1 - x0)
         dy = abs(y1 - y0)
         sx = 1 if x0 < x1 else -1
@@ -194,7 +114,22 @@ class SLAMProcessor:
         x, y = x0, y0
         
         while True:
-            points.append((x, y))
+            # Check bounds
+            if 0 <= y < self.grid.shape[0] and 0 <= x < self.grid.shape[1]:
+                # Update cell (miss if not at end, hit if at end)
+                if x == x1 and y == y1:
+                    # Hit (obstacle)
+                    self.log_odds_grid[y, x] += self.log_odds_hit
+                else:
+                    # Miss (free space)
+                    self.log_odds_grid[y, x] += self.log_odds_miss
+                
+                # Clamp values
+                self.log_odds_grid[y, x] = np.clip(
+                    self.log_odds_grid[y, x],
+                    self.min_log_odds,
+                    self.max_log_odds
+                )
             
             if x == x1 and y == y1:
                 break
@@ -206,80 +141,73 @@ class SLAMProcessor:
             if e2 < dx:
                 err += dx
                 y += sy
+    
+    def _update_grid_from_log_odds(self):
+        """Convert log odds to probability and update visualization grid."""
+        # Convert log odds to probability
+        prob = 1.0 - 1.0 / (1.0 + np.exp(self.log_odds_grid))
         
-        return points
+        # Threshold to occupancy values
+        self.grid = np.full_like(self.grid, self.map_config.get('unknown_value', 128))
+        self.grid[prob < self.free_threshold] = 255  # Free
+        self.grid[prob > self.occupied_threshold] = 0  # Occupied
+    
+    def update_pose(self, x: float, y: float, theta: float):
+        """Update robot pose.
+        
+        Args:
+            x, y: Position in pixels
+            theta: Orientation in radians
+        """
+        self.pose = np.array([x, y, theta], dtype=np.float32)
     
     def get_current_map(self) -> np.ndarray:
-        """
-        Get current occupancy grid map.
+        """Get current occupancy grid map.
         
         Returns:
-            Occupancy grid as numpy array
+            Occupancy grid as numpy array (0=occupied, 255=free, 128=unknown)
         """
-        return self.occupancy_grid.copy()
+        return self.grid.copy()
     
-    def get_map_image(self) -> np.ndarray:
-        """
-        Get map as displayable image.
+    def get_map_with_robot(self) -> np.ndarray:
+        """Get map with robot position marked.
         
         Returns:
-            Map image (grayscale, 0-255)
+            RGB map image with robot position
         """
-        # Convert probabilities to grayscale
-        map_image = (1.0 - self.occupancy_grid) * 255
-        map_image = map_image.astype(np.uint8)
+        # Convert to RGB
+        map_rgb = cv2.cvtColor(self.grid, cv2.COLOR_GRAY2RGB)
         
         # Draw robot position
-        robot_x, robot_y = int(self.robot_pose[0]), int(self.robot_pose[1])
-        cv2.circle(map_image, (robot_x, robot_y), 10, 0, -1)
+        x, y, theta = self.pose.astype(int)
+        if 0 <= x < map_rgb.shape[1] and 0 <= y < map_rgb.shape[0]:
+            # Robot body (blue circle)
+            cv2.circle(map_rgb, (x, y), 10, (255, 0, 0), -1)
+            
+            # Direction indicator (red line)
+            dx = int(20 * np.cos(theta))
+            dy = int(20 * np.sin(theta))
+            cv2.line(map_rgb, (x, y), (x + dx, y + dy), (0, 0, 255), 2)
         
-        # Draw orientation arrow
-        arrow_len = 20
-        arrow_x = int(robot_x + arrow_len * np.cos(self.robot_pose[2]))
-        arrow_y = int(robot_y + arrow_len * np.sin(self.robot_pose[2]))
-        cv2.arrowedLine(map_image, (robot_x, robot_y), (arrow_x, arrow_y), 0, 2)
-        
-        return map_image
+        return map_rgb
     
-    def save_map(self, filepath: str):
-        """
-        Save map to file.
+    def save_map(self, filename: str):
+        """Save map to file.
         
         Args:
-            filepath: Output file path (.pgm or .png)
+            filename: Output filename (.pgm or .png)
         """
         try:
-            map_image = self.get_map_image()
-            cv2.imwrite(filepath, map_image)
-            logger.info(f"Map saved to {filepath}")
+            cv2.imwrite(filename, self.grid)
+            logger.info(f"Map saved to {filename}")
         except Exception as e:
-            logger.error(f"Failed to save map: {e}")
-    
-    def update_robot_pose(self, x: float, y: float, theta: float):
-        """
-        Update robot pose (for odometry or localization).
-        
-        Args:
-            x: X position (pixels)
-            y: Y position (pixels)
-            theta: Orientation (radians)
-        """
-        self.robot_pose = np.array([x, y, theta])
-    
-    def get_robot_pose(self) -> Tuple[float, float, float]:
-        """
-        Get current robot pose.
-        
-        Returns:
-            (x, y, theta) tuple
-        """
-        return tuple(self.robot_pose)
+            logger.error(f"Error saving map: {e}")
     
     def reset_map(self):
         """Reset map to unknown state."""
-        self.occupancy_grid = np.ones((self.map_height, self.map_width)) * 0.5
-        self.log_odds_grid = np.zeros((self.map_height, self.map_width))
-        self.scan_count = 0
+        unknown = self.map_config.get('unknown_value', 128)
+        self.grid.fill(unknown)
+        self.log_odds_grid.fill(0)
         logger.info("Map reset")
 
 
@@ -289,31 +217,24 @@ if __name__ == "__main__":
     
     logging.basicConfig(level=logging.INFO)
     
-    with open('../config/slam_config.yaml', 'r') as f:
+    with open('config/slam_config.yaml') as f:
         config = yaml.safe_load(f)
     
     slam = SLAMProcessor(config)
     
-    # Simulate scan data
-    print("\nSimulating LiDAR scans...")
+    print("\nTest 1: Simulated scan")
+    # Simulate a simple scan (square room)
+    angles = np.linspace(0, 360, 360)
+    ranges = np.full(360, 5.0)  # 5 meters all around
     
-    for i in range(5):
-        # Generate fake scan (square room)
-        angles = list(range(0, 360, 1))
-        ranges = []
-        
-        for angle in angles:
-            # Simple square room simulation
-            if 45 <= angle < 135 or 225 <= angle < 315:
-                ranges.append(2.0)  # Side walls
-            else:
-                ranges.append(3.0)  # Front/back walls
-        
-        slam.add_scan(ranges, angles)
-    
-    print(f"\nProcessed {slam.scan_count} scans")
+    slam.add_scan(ranges.tolist(), angles.tolist())
     
     # Save map
-    output_path = "test_map.png"
-    slam.save_map(output_path)
-    print(f"\nMap saved to {output_path}")
+    os.makedirs('maps', exist_ok=True)
+    slam.save_map('maps/test_map.png')
+    print(f"Map saved: maps/test_map.png")
+    
+    # Get map with robot
+    map_with_robot = slam.get_map_with_robot()
+    cv2.imwrite('maps/test_map_robot.png', map_with_robot)
+    print(f"Map with robot saved: maps/test_map_robot.png")

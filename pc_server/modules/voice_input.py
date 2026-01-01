@@ -1,78 +1,54 @@
 #!/usr/bin/env python3
 """
 Voice Input Module - Speech Recognition
-
-Handles audio capture and speech-to-text conversion using
-various backends (Google, Whisper, Sphinx).
-
-Author: Distributed Robot System
-Date: January 2026
+Handles audio capture and speech-to-text conversion
 """
 
 import logging
 import speech_recognition as sr
-from typing import Optional, Callable
+from typing import Dict, Optional
 import threading
-import time
+import queue
 
 logger = logging.getLogger(__name__)
 
-
 class VoiceInput:
-    """Speech recognition handler for robot voice control."""
+    """Speech recognition using Google Speech Recognition."""
     
-    def __init__(self, config: dict, callback: Optional[Callable] = None):
-        """
-        Initialize voice input.
+    def __init__(self, config: Dict):
+        """Initialize voice input system.
         
         Args:
-            config: Audio configuration dictionary
-            callback: Function to call with recognized text
+            config: Configuration dictionary from robot_config.yaml
         """
-        self.config = config.get('audio', {}).get('microphone', {})
-        self.speech_config = config.get('ai', {}).get('speech_recognition', {})
-        self.callback = callback
-        
-        # Initialize recognizer
+        self.config = config
         self.recognizer = sr.Recognizer()
-        
-        # Configure recognizer
-        self.recognizer.energy_threshold = self.config.get('silence_threshold', 500)
-        self.recognizer.dynamic_energy_threshold = True
-        self.recognizer.pause_threshold = self.config.get('silence_duration', 1.5)
-        
-        # Get microphone
-        device_index = self.config.get('device_index', None)
-        self.microphone = sr.Microphone(device_index=device_index)
-        
-        # Recognition settings
-        self.engine = self.speech_config.get('engine', 'google')
-        self.language = self.speech_config.get('language', 'en-IN')
-        self.timeout = self.speech_config.get('timeout', 5)
-        self.phrase_time_limit = self.speech_config.get('phrase_time_limit', 10)
-        
-        # State
+        self.microphone = None
         self.listening = False
-        self.listen_thread = None
+        self.audio_queue = queue.Queue()
         
-        # Adjust for ambient noise
-        self._calibrate_microphone()
+        # Get microphone device
+        device_index = config.get('audio', {}).get('microphone', {}).get('device_index')
         
-        logger.info(f"Voice input initialized (engine: {self.engine}, language: {self.language})")
-    
-    def _calibrate_microphone(self):
-        """Calibrate microphone for ambient noise."""
         try:
+            self.microphone = sr.Microphone(device_index=device_index)
+            
+            # Adjust for ambient noise
             with self.microphone as source:
-                logger.info("Calibrating microphone for ambient noise... (1 second)")
+                logger.info("Calibrating for ambient noise...")
                 self.recognizer.adjust_for_ambient_noise(source, duration=1)
-                logger.info(f"Microphone calibrated (threshold: {self.recognizer.energy_threshold})")
+            
+            logger.info(f"Voice input initialized with device: {device_index or 'default'}")
+            
         except Exception as e:
-            logger.error(f"Microphone calibration failed: {e}")
+            logger.error(f"Microphone initialization error: {e}")
+            raise
     
-    def listen_once(self) -> Optional[str]:
-        """
-        Listen for a single voice command.
+    def listen_once(self, timeout: float = 5.0) -> Optional[str]:
+        """Listen for a single speech command.
+        
+        Args:
+            timeout: Maximum time to wait for speech (seconds)
         
         Returns:
             Recognized text or None
@@ -80,54 +56,18 @@ class VoiceInput:
         try:
             with self.microphone as source:
                 logger.info("Listening...")
-                audio = self.recognizer.listen(
-                    source,
-                    timeout=self.timeout,
-                    phrase_time_limit=self.phrase_time_limit
-                )
-                
-                logger.info("Processing speech...")
-                text = self._recognize_speech(audio)
-                
-                if text:
-                    logger.info(f"Recognized: {text}")
-                    if self.callback:
-                        self.callback(text)
-                    return text
-                else:
-                    logger.warning("No speech recognized")
-                    return None
-                    
+                audio = self.recognizer.listen(source, timeout=timeout, phrase_time_limit=10)
+            
+            logger.info("Processing speech...")
+            text = self.recognizer.recognize_google(audio)
+            logger.info(f"Recognized: {text}")
+            return text
+            
         except sr.WaitTimeoutError:
-            logger.warning("Listening timeout - no speech detected")
+            logger.debug("No speech detected (timeout)")
             return None
-        except Exception as e:
-            logger.error(f"Listen error: {e}")
-            return None
-    
-    def _recognize_speech(self, audio) -> Optional[str]:
-        """
-        Convert audio to text using configured engine.
-        
-        Args:
-            audio: Audio data
-        
-        Returns:
-            Recognized text or None
-        """
-        try:
-            if self.engine == 'google':
-                return self.recognizer.recognize_google(audio, language=self.language)
-            elif self.engine == 'whisper':
-                return self.recognizer.recognize_whisper(audio, language=self.language[:2])
-            elif self.engine == 'sphinx':
-                return self.recognizer.recognize_sphinx(audio)
-            else:
-                logger.error(f"Unknown speech engine: {self.engine}")
-                return None
-                
         except sr.UnknownValueError:
-            logger.warning("Speech not understood")
+            logger.warning("Could not understand audio")
             return None
         except sr.RequestError as e:
             logger.error(f"Speech recognition service error: {e}")
@@ -136,72 +76,112 @@ class VoiceInput:
             logger.error(f"Speech recognition error: {e}")
             return None
     
-    def start_continuous_listening(self):
-        """Start continuous listening in background thread."""
+    def start_continuous_listening(self, callback):
+        """Start continuous listening in background thread.
+        
+        Args:
+            callback: Function to call with recognized text
+        """
         if self.listening:
             logger.warning("Already listening")
             return
         
         self.listening = True
-        self.listen_thread = threading.Thread(target=self._continuous_listen_loop, daemon=True)
-        self.listen_thread.start()
-        logger.info("Started continuous listening")
+        
+        def listen_loop():
+            """Background listening loop."""
+            logger.info("Started continuous listening")
+            
+            with self.microphone as source:
+                while self.listening:
+                    try:
+                        audio = self.recognizer.listen(source, timeout=1, phrase_time_limit=10)
+                        
+                        # Recognize in separate thread to avoid blocking
+                        threading.Thread(
+                            target=self._process_audio,
+                            args=(audio, callback),
+                            daemon=True
+                        ).start()
+                        
+                    except sr.WaitTimeoutError:
+                        continue
+                    except Exception as e:
+                        if self.listening:
+                            logger.error(f"Listening error: {e}")
+                        break
+            
+            logger.info("Stopped continuous listening")
+        
+        # Start listening thread
+        threading.Thread(target=listen_loop, daemon=True).start()
     
-    def _continuous_listen_loop(self):
-        """Background loop for continuous listening."""
-        while self.listening:
-            try:
-                text = self.listen_once()
-                if text and self.callback:
-                    self.callback(text)
-                time.sleep(0.5)  # Brief pause between listens
-            except Exception as e:
-                logger.error(f"Continuous listen error: {e}")
-                time.sleep(1)
+    def _process_audio(self, audio, callback):
+        """Process audio in background.
+        
+        Args:
+            audio: Audio data
+            callback: Function to call with result
+        """
+        try:
+            text = self.recognizer.recognize_google(audio)
+            logger.info(f"Recognized: {text}")
+            callback(text)
+        except sr.UnknownValueError:
+            logger.debug("Could not understand audio")
+        except sr.RequestError as e:
+            logger.error(f"Recognition service error: {e}")
+        except Exception as e:
+            logger.error(f"Audio processing error: {e}")
     
     def stop_continuous_listening(self):
         """Stop continuous listening."""
         self.listening = False
-        if self.listen_thread:
-            self.listen_thread.join(timeout=5)
-        logger.info("Stopped continuous listening")
+        logger.info("Stopping continuous listening...")
     
-    def test_microphone(self) -> bool:
-        """
-        Test if microphone is working.
+    @staticmethod
+    def list_microphones():
+        """List available microphone devices.
         
         Returns:
-            True if microphone works
+            List of microphone names
         """
-        try:
-            with self.microphone as source:
-                logger.info("Testing microphone...")
-                audio = self.recognizer.listen(source, timeout=3, phrase_time_limit=3)
-                logger.info("Microphone test successful")
-                return True
-        except Exception as e:
-            logger.error(f"Microphone test failed: {e}")
-            return False
+        return sr.Microphone.list_microphone_names()
 
 
 if __name__ == "__main__":
     # Test voice input
     import yaml
+    import time
     
     logging.basicConfig(level=logging.INFO)
     
-    with open('../config/robot_config.yaml', 'r') as f:
+    # List available microphones
+    print("\nAvailable microphones:")
+    for i, name in enumerate(VoiceInput.list_microphones()):
+        print(f"  {i}: {name}")
+    
+    with open('config/robot_config.yaml') as f:
         config = yaml.safe_load(f)
     
+    voice = VoiceInput(config)
+    
+    # Test single listen
+    print("\nTest 1: Single listen (speak something in 5 seconds)...")
+    text = voice.listen_once(timeout=5)
+    print(f"Result: {text}")
+    
+    # Test continuous listening
+    print("\nTest 2: Continuous listening (speak multiple times, Ctrl+C to stop)...")
+    
     def on_speech(text):
-        print(f"\n>>> Heard: {text}")
+        print(f">>> Heard: {text}")
     
-    voice = VoiceInput(config, callback=on_speech)
+    voice.start_continuous_listening(on_speech)
     
-    print("\nSay something...")
-    voice.listen_once()
-    
-    print("\nTesting continuous listening (10 seconds)...")
-    voice.start_continuous_listening()
-    time.sleep(10)
-    voice.stop_continuous_listening()
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        voice.stop_continuous_listening()
+        print("\nStopped.")
