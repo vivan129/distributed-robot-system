@@ -1,29 +1,30 @@
-# ============================================================
-# DISTRIBUTED ROBOT SYSTEM - HARDWARE CONFIGURATION
-# ============================================================
+# ========================================
+# Robot Hardware Configuration
+# ========================================
 
 # Network Configuration
 network:
-  pc_ip: "192.168.1.100"      # PC Server IP (change to your PC's static IP)
-  pc_port: 5000               # PC Flask/SocketIO port
-  pi_ip: "192.168.1.101"      # Raspberry Pi IP (change to your Pi's IP)
-  pi_display_port: 8080       # Pi face display port
-  websocket_timeout: 30       # seconds
+  pc_ip: "192.168.1.100"          # PC server IP (change to your PC's IP)
+  pc_port: 5000                    # PC server port
+  pi_ip: "192.168.1.101"          # Raspberry Pi IP (change to your Pi's IP)
+  pi_display_port: 8080           # Face display port on Pi
+  socketio_namespace_pc: "/pc"    # SocketIO namespace for PC
+  socketio_namespace_pi: "/pi"    # SocketIO namespace for Pi
 
 # Motor Configuration (GPIO BOARD numbering)
 motors:
-  pin_mode: "BOARD"           # or "BCM"
+  pin_mode: "BOARD"               # GPIO numbering mode (BOARD or BCM)
   pins:
-    L1: 33                    # Left Motor Forward
-    L2: 38                    # Left Motor Backward
-    R1: 35                    # Right Motor Forward
-    R2: 40                    # Right Motor Backward
-  pwm_frequency: 1000         # Hz
-  default_speed: 70           # 0-100%
-  turn_speed: 60              # Speed for turning
-  ramp_time: 0.2              # Seconds for speed ramping
+    L1: 33                        # Left motor forward
+    L2: 38                        # Left motor backward
+    R1: 35                        # Right motor forward
+    R2: 40                        # Right motor backward
+  pwm_frequency: 100              # PWM frequency in Hz
+  default_speed: 50               # Default speed (0-100%)
+  turn_speed: 40                  # Speed during turns
+  timeout: 10                     # Motor auto-stop timeout (seconds)
 
-# Relay Configuration (Optional - for external devices)
+# Relay Configuration (Optional)
 relays:
   enabled: false
   pins:
@@ -34,94 +35,86 @@ relays:
 
 # Camera Configuration
 camera:
-  type: "opencv"              # "opencv" or "picamera2"
-  device_id: 0                # For OpenCV (usually 0)
+  type: "opencv"                  # "opencv" or "picamera2"
+  device_id: 0                    # Camera device ID for OpenCV
   width: 640
   height: 480
   fps: 30
-  rotation: 0                 # 0, 90, 180, 270
-  flip_horizontal: false
+  format: "MJPEG"                 # Video format
   flip_vertical: false
-  stream_quality: 85          # JPEG quality (1-100)
+  flip_horizontal: false
+  stream_quality: 80              # JPEG quality (0-100)
 
-# LiDAR Configuration (RP-LIDAR A1)
+# LiDAR Configuration
 lidar:
   enabled: true
-  port: "/dev/ttyUSB0"        # Check with: ls /dev/ttyUSB*
+  port: "/dev/ttyUSB0"            # Serial port
   baudrate: 115200
-  scan_mode: "Standard"       # "Standard", "Express", "Boost"
-  timeout: 1.0                # seconds
-  min_distance: 0.15          # meters (15cm)
-  max_distance: 12.0          # meters
+  timeout: 1
+  scan_mode: "standard"           # "standard", "express", "boost"
+  max_distance: 12.0              # Maximum range in meters
+  min_distance: 0.15              # Minimum range in meters
+  angle_resolution: 1.0           # Degrees per sample
 
-# Ultrasonic Sensor Configuration (HC-SR04)
+# Ultrasonic Sensor Configuration
 ultrasonic:
   enabled: true
-  trigger_pin: 11             # GPIO BOARD numbering
+  trigger_pin: 11                 # GPIO BOARD numbering
   echo_pin: 13
-  max_distance: 400           # cm
-  measurement_timeout: 0.5    # seconds
-  samples: 3                  # Average of N measurements
+  max_distance: 400               # Maximum distance in cm
+  timeout: 0.05                   # Measurement timeout
+  sample_rate: 10                 # Readings per second
+
+# Display Configuration
+display:
+  width: 1280
+  height: 800
+  fullscreen: true
+  face_size: 600                  # Face canvas size in pixels
+  fps: 60                         # Animation frame rate
+  eye_blink_interval: [3, 7]      # Random blink interval (min, max) seconds
 
 # Audio Configuration
 audio:
-  microphone:
-    device_index: null        # null = default, or specific index
-    sample_rate: 16000
-    channels: 1
-    chunk_size: 1024
-  speakers:
-    device_index: null        # null = default
-    volume: 80                # 0-100%
-    audio_format: "mp3"       # "mp3" or "wav"
-
-# Face Display Configuration
-display:
-  width: 1024                 # Display resolution
-  height: 600
-  fullscreen: true
-  frame_rate: 60              # Target FPS
-  background_color: "#000000"
-  eye_color: "#00FFFF"        # Cyan
-  mouth_color: "#FFFFFF"      # White
+  input_device: null              # null = default microphone
+  output_device: null             # null = default speakers
+  sample_rate: 16000
+  channels: 1
+  chunk_size: 1024
+  format: "int16"
 
 # Safety Configuration
 safety:
-  obstacle_threshold: 30      # cm - stop if obstacle closer
+  obstacle_threshold: 30          # Stop distance in cm
   emergency_stop_enabled: true
-  watchdog_timeout: 5.0       # seconds - stop if no PC command
-  max_continuous_run: 30      # seconds - max time for single movement
-  collision_detection: true
+  auto_cleanup: true              # Auto GPIO cleanup on exit
+  watchdog_timeout: 5             # Connection watchdog timeout
 
 # AI Configuration
 ai:
-  model: "gemini-2.0-flash-exp"
+  model: "gemini-2.0-flash-exp"   # Gemini model
   temperature: 0.7
-  max_tokens: 1000
-  timeout: 10.0               # seconds
-  fallback_responses:
-    - "I didn't quite understand that."
-    - "Could you please repeat?"
-    - "I'm having trouble processing that."
+  max_tokens: 1024
+  system_prompt: |
+    You are a helpful robot assistant. You can:
+    - Move forward, backward, left, and right
+    - Answer questions conversationally
+    - Control your movements based on voice commands
+    
+    When given movement commands, respond with the action you'll take.
+    Be friendly, concise, and helpful.
 
 # TTS Configuration
 tts:
-  voice: "en-IN-NeerjaNeural" # Indian English female voice
-  rate: "+0%"                 # Speech rate (-50% to +50%)
-  pitch: "+0Hz"               # Pitch adjustment
-  volume: "+0%"               # Volume adjustment
+  voice: "en-IN-NeerjaNeural"     # Edge TTS voice
+  rate: "+0%"                     # Speech rate
+  volume: "+0%"                   # Speech volume
+  output_format: "audio-16khz-32kbitrate-mono-mp3"
 
 # Logging Configuration
 logging:
-  level: "INFO"               # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"                   # DEBUG, INFO, WARNING, ERROR
   log_to_file: true
-  log_dir: "logs"
-  max_file_size: 10           # MB
-  backup_count: 5             # Number of log files to keep
-
-# Performance Configuration
-performance:
-  max_frame_buffer: 10        # Max queued camera frames
-  lidar_decimation: 1         # Send every Nth scan (1 = all)
-  async_processing: true      # Use async for I/O operations
-  thread_pool_size: 4         # Worker threads
+  log_file: "logs/robot.log"
+  max_bytes: 10485760             # 10 MB
+  backup_count: 5
