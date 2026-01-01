@@ -1,282 +1,234 @@
 #!/usr/bin/env python3
 """
-Robot Controller Module - Centralized Command Dispatcher
-
-Coordinates all robot subsystems and manages communication
-with Raspberry Pi hardware interface.
-
-Author: Distributed Robot System
-Date: January 2026
+Robot Controller Module
+Centralized robot command dispatcher and coordinator
 """
 
 import logging
 import asyncio
-from typing import Dict, Optional, Callable
+from typing import Dict, Optional
 import time
 
 logger = logging.getLogger(__name__)
 
-
 class RobotController:
-    """Central controller for robot command coordination."""
+    """Centralized robot command dispatcher."""
     
     def __init__(self, config: Dict, socketio):
-        """
-        Initialize robot controller.
+        """Initialize robot controller.
         
         Args:
-            config: Robot configuration dictionary
-            socketio: SocketIO instance for communication
+            config: Configuration dictionary
+            socketio: Flask-SocketIO instance for communication
         """
         self.config = config
         self.socketio = socketio
-        
-        # Connection state
         self.pi_connected = False
-        self.pi_sid = None
+        self.last_command_time = 0
+        self.current_movement = None
         
-        # Command queue
-        self.command_queue = asyncio.Queue()
-        
-        # State tracking
-        self.current_state = {
-            'moving': False,
-            'direction': None,
-            'last_command': None,
-            'last_command_time': 0
-        }
-        
-        # Sensor data
-        self.sensor_data = {
-            'camera_frame': None,
-            'lidar_scan': None,
-            'ultrasonic_distance': None,
-            'last_update': 0
-        }
-        
-        logger.info("Robot Controller initialized")
+        logger.info("Robot controller initialized")
     
-    def set_pi_connection(self, sid: str, connected: bool):
-        """
-        Update Pi connection status.
+    def set_pi_connected(self, connected: bool):
+        """Update Pi connection status.
         
         Args:
-            sid: Socket ID
             connected: Connection status
         """
         self.pi_connected = connected
-        self.pi_sid = sid if connected else None
-        
         status = "connected" if connected else "disconnected"
-        logger.info(f"Raspberry Pi {status} (sid: {sid})")
+        logger.info(f"Raspberry Pi {status}")
     
-    async def send_movement_command(self, command: Dict):
-        """
-        Send movement command to Pi.
+    async def send_movement(self, command: Dict) -> bool:
+        """Send movement command to Pi.
         
         Args:
-            command: Movement command dictionary
-                - direction: forward, backward, left, right, stop
-                - duration: seconds (optional)
-                - speed: 0-100 (optional)
+            command: Movement command dict with 'direction' and 'duration'
+        
+        Returns:
+            True if command sent successfully
         """
         if not self.pi_connected:
-            logger.warning("Cannot send command - Pi not connected")
+            logger.warning("Cannot send movement: Pi not connected")
             return False
         
         try:
-            # Validate command
-            if 'direction' not in command:
-                logger.error("Movement command missing 'direction'")
-                return False
+            self.current_movement = command
+            self.last_command_time = time.time()
             
-            # Set defaults
-            command.setdefault('duration', 2.0)
-            command.setdefault('speed', 75)
-            
-            # Send to Pi
+            # Send to Pi via SocketIO
             self.socketio.emit(
                 'movement_command',
                 command,
-                room=self.pi_sid,
-                namespace='/pi'
+                namespace='/pi',
+                room='pi_client'
             )
             
-            # Update state
-            self.current_state['moving'] = True
-            self.current_state['direction'] = command['direction']
-            self.current_state['last_command'] = command
-            self.current_state['last_command_time'] = time.time()
-            
-            logger.info(f"Movement command sent: {command}")
+            logger.info(f"Sent movement: {command['direction']} for {command['duration']}s")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to send movement command: {e}")
+            logger.error(f"Error sending movement: {e}")
             return False
     
-    async def send_stop_command(self):
-        """
-        Send emergency stop command to Pi.
+    async def send_stop(self) -> bool:
+        """Send emergency stop command.
+        
+        Returns:
+            True if command sent successfully
         """
         if not self.pi_connected:
-            logger.warning("Cannot send stop - Pi not connected")
+            logger.warning("Cannot send stop: Pi not connected")
             return False
         
         try:
+            # Send stop command
             self.socketio.emit(
                 'stop_command',
                 {},
-                room=self.pi_sid,
-                namespace='/pi'
+                namespace='/pi',
+                room='pi_client'
             )
             
-            self.current_state['moving'] = False
-            self.current_state['direction'] = None
-            
-            logger.info("Stop command sent")
+            self.current_movement = None
+            logger.info("Sent STOP command")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to send stop command: {e}")
+            logger.error(f"Error sending stop: {e}")
             return False
     
-    async def send_face_animation(self, keyframes: list, duration: float):
-        """
-        Send face animation to Pi display.
+    async def send_face_animation(self, animation: Dict) -> bool:
+        """Send face animation to Pi display.
         
         Args:
-            keyframes: List of animation keyframe dictionaries
-            duration: Total animation duration (seconds)
+            animation: Animation data dict
+        
+        Returns:
+            True if sent successfully
         """
         if not self.pi_connected:
-            logger.warning("Cannot send animation - Pi not connected")
+            logger.warning("Cannot send animation: Pi not connected")
             return False
         
         try:
-            animation_data = {
-                'keyframes': keyframes,
-                'duration': duration,
-                'fps': self.config.get('display', {}).get('fps', 60)
-            }
-            
             self.socketio.emit(
                 'face_animation',
-                animation_data,
-                room=self.pi_sid,
-                namespace='/pi'
+                animation,
+                namespace='/pi',
+                room='pi_display'
             )
             
-            logger.debug(f"Face animation sent ({len(keyframes)} keyframes, {duration:.2f}s)")
+            logger.info(f"Sent face animation: {animation['duration']:.2f}s")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to send face animation: {e}")
+            logger.error(f"Error sending animation: {e}")
             return False
     
-    async def send_audio(self, audio_path: str):
-        """
-        Send audio file path to Pi for playback.
+    async def send_audio(self, audio_path: str) -> bool:
+        """Send audio file path to Pi for playback.
         
         Args:
             audio_path: Path to audio file
+        
+        Returns:
+            True if sent successfully
         """
         if not self.pi_connected:
-            logger.warning("Cannot send audio - Pi not connected")
+            logger.warning("Cannot send audio: Pi not connected")
             return False
         
         try:
             self.socketio.emit(
                 'play_audio',
                 {'audio_path': audio_path},
-                room=self.pi_sid,
-                namespace='/pi'
+                namespace='/pi',
+                room='pi_client'
             )
             
-            logger.info(f"Audio playback requested: {audio_path}")
+            logger.info(f"Sent audio: {audio_path}")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to send audio command: {e}")
+            logger.error(f"Error sending audio: {e}")
             return False
     
-    def update_camera_frame(self, frame_data: bytes, timestamp: float):
-        """
-        Update camera frame from Pi.
+    def get_status(self) -> Dict:
+        """Get current robot status.
         
-        Args:
-            frame_data: JPEG frame data
-            timestamp: Frame timestamp
+        Returns:
+            Status dictionary
         """
-        self.sensor_data['camera_frame'] = frame_data
-        self.sensor_data['last_update'] = timestamp
-    
-    def update_lidar_scan(self, scan_data: Dict):
-        """
-        Update LiDAR scan from Pi.
-        
-        Args:
-            scan_data: Dictionary with ranges and angles
-        """
-        self.sensor_data['lidar_scan'] = scan_data
-        self.sensor_data['last_update'] = time.time()
-    
-    def update_ultrasonic(self, distance: float):
-        """
-        Update ultrasonic distance measurement.
-        
-        Args:
-            distance: Distance in cm
-        """
-        self.sensor_data['ultrasonic_distance'] = distance
-        self.sensor_data['last_update'] = time.time()
-        
-        # Check for obstacles
-        threshold = self.config.get('ultrasonic', {}).get('obstacle_threshold', 30)
-        if distance < threshold:
-            logger.warning(f"Obstacle detected at {distance:.1f}cm!")
-            # Could trigger emergency stop here
-    
-    def get_sensor_data(self) -> Dict:
-        """Get latest sensor data."""
-        return self.sensor_data.copy()
-    
-    def get_robot_state(self) -> Dict:
-        """Get current robot state."""
         return {
-            **self.current_state,
             'pi_connected': self.pi_connected,
-            'sensor_age': time.time() - self.sensor_data['last_update']
+            'current_movement': self.current_movement,
+            'last_command_time': self.last_command_time,
+            'uptime': time.time()
         }
     
-    def is_pi_connected(self) -> bool:
-        """Check if Pi is connected."""
-        return self.pi_connected
+    async def execute_command_sequence(self, commands: list) -> bool:
+        """Execute a sequence of commands.
+        
+        Args:
+            commands: List of command dictionaries
+        
+        Returns:
+            True if all commands executed successfully
+        """
+        for cmd in commands:
+            if cmd.get('type') == 'movement':
+                success = await self.send_movement(cmd)
+                if not success:
+                    return False
+                # Wait for movement duration
+                await asyncio.sleep(cmd.get('duration', 0))
+            
+            elif cmd.get('type') == 'wait':
+                await asyncio.sleep(cmd.get('duration', 0))
+            
+            elif cmd.get('type') == 'stop':
+                await self.send_stop()
+        
+        return True
 
 
 if __name__ == "__main__":
-    # Test controller (requires socketio mock)
+    # Test robot controller (mock)
+    import yaml
+    
     logging.basicConfig(level=logging.INFO)
     
-    class MockSocketIO:
-        def emit(self, event, data, room=None, namespace=None):
-            print(f"Mock emit: {event} -> {data}")
-    
-    import yaml
-    with open('../config/robot_config.yaml', 'r') as f:
+    with open('config/robot_config.yaml') as f:
         config = yaml.safe_load(f)
     
-    controller = RobotController(config, MockSocketIO())
+    # Mock socketio
+    class MockSocketIO:
+        def emit(self, event, data, **kwargs):
+            print(f"EMIT: {event} -> {data}")
     
-    # Simulate Pi connection
-    controller.set_pi_connection("test_sid_123", True)
+    controller = RobotController(config, MockSocketIO())
+    controller.set_pi_connected(True)
     
     # Test commands
-    asyncio.run(controller.send_movement_command({
-        'direction': 'forward',
-        'duration': 3.0
-    }))
+    async def test():
+        print("\nTest 1: Single movement")
+        await controller.send_movement({'direction': 'forward', 'duration': 3})
+        
+        print("\nTest 2: Stop command")
+        await controller.send_stop()
+        
+        print("\nTest 3: Command sequence")
+        sequence = [
+            {'type': 'movement', 'direction': 'forward', 'duration': 2},
+            {'type': 'wait', 'duration': 1},
+            {'type': 'movement', 'direction': 'right', 'duration': 1.5},
+            {'type': 'stop'}
+        ]
+        await controller.execute_command_sequence(sequence)
+        
+        print("\nTest 4: Status")
+        status = controller.get_status()
+        print(f"Status: {status}")
     
-    asyncio.run(controller.send_stop_command())
-    
-    print("\nRobot state:", controller.get_robot_state())
+    asyncio.run(test())
