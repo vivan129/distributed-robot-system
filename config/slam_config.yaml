@@ -1,0 +1,138 @@
+# SLAM (Simultaneous Localization and Mapping) Configuration
+
+# Map Parameters
+map:
+  resolution: 0.05               # meters per pixel
+  size: [2000, 2000]             # [width, height] in pixels
+  origin: [1000, 1000]           # [x, y] center point
+  default_value: 127             # Unknown cell value (0-255)
+  occupied_threshold: 200        # Cell considered occupied if > this
+  free_threshold: 50             # Cell considered free if < this
+
+# LiDAR Processing
+lidar:
+  range_min: 0.15                # Minimum valid range (meters)
+  range_max: 12.0                # Maximum valid range (meters)
+  angle_increment: 1.0           # Degrees between samples
+  scan_time: 0.1                 # Time per scan (seconds)
+  
+  # Filtering
+  median_filter_size: 3          # Remove noise spikes
+  range_filter_enabled: true
+  max_range_variance: 0.1        # Filter out inconsistent readings
+
+# Occupancy Grid Mapping
+occupancy:
+  hit_probability: 0.7           # P(cell occupied | hit)
+  miss_probability: 0.4          # P(cell occupied | miss)
+  prior_probability: 0.5         # Initial belief
+  
+  # Log-odds parameters
+  log_odds_hit: 0.85
+  log_odds_miss: -0.4
+  log_odds_min: -5.0
+  log_odds_max: 5.0
+  
+  # Ray tracing
+  bresenham_step: 1              # Pixels per ray step
+  inflation_radius: 0.2          # meters - obstacle inflation
+
+# Localization
+localization:
+  # Particle Filter Parameters
+  num_particles: 500
+  initial_pose: [0.0, 0.0, 0.0]  # [x, y, theta] in meters and radians
+  
+  # Motion Model Noise
+  alpha1: 0.1                    # Rotation noise from rotation
+  alpha2: 0.1                    # Rotation noise from translation
+  alpha3: 0.1                    # Translation noise from translation
+  alpha4: 0.1                    # Translation noise from rotation
+  
+  # Sensor Model
+  z_hit: 0.95                    # Weight for correct range
+  z_short: 0.01                  # Weight for short readings
+  z_max: 0.01                    # Weight for max range
+  z_rand: 0.03                   # Weight for random readings
+  sigma_hit: 0.2                 # Std dev of measurement noise
+  
+  # Resampling
+  resample_threshold: 0.5        # Neff threshold for resampling
+  recovery_alpha_slow: 0.001
+  recovery_alpha_fast: 0.1
+
+# Path Planning
+path_planning:
+  algorithm: "a_star"             # Options: "dijkstra", "a_star", "rrt"
+  
+  # A* Parameters
+  diagonal_movement: true
+  heuristic: "euclidean"         # Options: "manhattan", "euclidean", "octile"
+  
+  # Path Smoothing
+  smooth_path: true
+  smoothing_iterations: 10
+  smoothing_weight_data: 0.5
+  smoothing_weight_smooth: 0.3
+  
+  # Safety margins
+  robot_radius: 0.25             # meters
+  safety_distance: 0.1           # Additional clearance
+  
+  # Goal tolerance
+  xy_goal_tolerance: 0.1         # meters
+  yaw_goal_tolerance: 0.1        # radians
+
+# Loop Closure Detection
+loop_closure:
+  enabled: true
+  min_travel_distance: 2.0       # meters before checking
+  min_time_interval: 30          # seconds between checks
+  score_threshold: 0.8           # Similarity threshold (0-1)
+  max_candidates: 5              # Number of candidates to check
+
+# Odometry
+odometry:
+  source: "encoder"               # Options: "encoder", "visual", "imu"
+  
+  # Wheel odometry parameters
+  wheel_base: 0.3                # meters between wheels
+  wheel_radius: 0.065            # meters
+  encoder_ticks_per_rev: 360
+  
+  # Covariance (x, y, theta)
+  covariance_xx: 0.01
+  covariance_yy: 0.01
+  covariance_aa: 0.05
+
+# Update Rates
+update_rates:
+  map_update_hz: 10              # Map update frequency
+  pose_publish_hz: 20            # Pose broadcast frequency
+  tf_publish_hz: 50              # Transform updates
+  visualization_hz: 5            # Dashboard updates
+
+# Visualization
+visualization:
+  show_particles: true
+  show_rays: false               # Ray tracing visualization
+  show_path: true
+  particle_color: [255, 0, 0]    # RGB
+  path_color: [0, 255, 0]
+  robot_color: [0, 0, 255]
+  line_thickness: 2
+
+# Map Saving
+map_save:
+  auto_save: true
+  save_interval: 300             # seconds
+  save_directory: "maps/"
+  format: "pgm"                  # Options: "pgm", "png", "yaml"
+  include_metadata: true
+
+# Performance
+performance:
+  max_processing_time: 0.1       # seconds per update
+  multithreading: true
+  num_threads: 4
+  use_gpu: false                 # GPU acceleration if available
