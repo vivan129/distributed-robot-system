@@ -19,12 +19,15 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # Virtual Environment
 venv/
 ENV/
 env/
 .venv
+env.bak/
+venv.bak/
 
 # IDE
 .vscode/
@@ -33,14 +36,17 @@ env/
 *.swo
 *~
 .DS_Store
+*.code-workspace
 
 # Logs
 *.log
 logs/
+*.log.*
 
 # Environment variables
 .env
 .env.local
+.env.*.local
 
 # Temporary files
 /tmp/
@@ -48,25 +54,89 @@ logs/
 *.mp3
 *.wav
 /temp/
+*.bak
+
+# Output directories
+/pc_server/output/
+/pc_server/output/audio/
+/pc_server/output/maps/
 
 # SLAM maps
 *.pgm
 *.yaml
 maps/
+/data/slam/
 
 # Camera captures
 captures/
 *.jpg
 *.png
+/data/captures/
+
+# Audio recordings
+/data/recordings/
 
 # System
 Thumbs.db
+.DS_Store
 
 # Project specific
 /data/
 /models/
 *.ckpt
 *.pth
+*.h5
+*.pkl
 
 # Config overrides
 config/*_local.yaml
+config/robot_config_local.yaml
+config/slam_config_local.yaml
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Documentation builds
+docs/_build/
+docs/.doctrees/
+site/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# Large files
+*.mp4
+*.avi
+*.mov
+
+# Hardware specific
+*.pcap
+*.bin
+
+# Backup files
+*~.nib
+*.backup
