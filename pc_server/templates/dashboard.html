@@ -11,363 +11,286 @@
             padding: 0;
             box-sizing: border-box;
         }
-
+        
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: #fff;
-            min-height: 100vh;
             padding: 20px;
         }
-
+        
         .container {
             max-width: 1400px;
             margin: 0 auto;
         }
-
-        header {
+        
+        h1 {
             text-align: center;
             margin-bottom: 30px;
-        }
-
-        h1 {
             font-size: 2.5em;
-            margin-bottom: 10px;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
         }
-
-        .status-indicator {
-            display: inline-block;
-            padding: 8px 20px;
-            border-radius: 20px;
-            background: rgba(255,255,255,0.2);
-            font-size: 0.9em;
-        }
-
-        .status-indicator.connected {
-            background: rgba(76, 175, 80, 0.8);
-        }
-
-        .status-indicator.disconnected {
-            background: rgba(244, 67, 54, 0.8);
-        }
-
-        .dashboard-grid {
+        
+        .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 20px;
             margin-bottom: 20px;
         }
-
+        
         .card {
-            background: rgba(255,255,255,0.15);
+            background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(10px);
             border-radius: 15px;
             padding: 20px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
         }
-
+        
         .card h2 {
             margin-bottom: 15px;
             font-size: 1.5em;
-            border-bottom: 2px solid rgba(255,255,255,0.3);
-            padding-bottom: 10px;
         }
-
-        .control-buttons {
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-connected { background: #00ff00; }
+        .status-disconnected { background: #ff0000; }
+        
+        .controls {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 10px;
             margin-top: 15px;
         }
-
-        .btn {
+        
+        button {
             padding: 15px;
-            border: none;
-            border-radius: 10px;
             font-size: 1em;
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.3s;
-            background: rgba(255,255,255,0.9);
-            color: #667eea;
-        }
-
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-        }
-
-        .btn:active {
-            transform: translateY(0);
-        }
-
-        .btn-forward { grid-column: 2; }
-        .btn-left { grid-column: 1; grid-row: 2; }
-        .btn-stop { grid-column: 2; grid-row: 2; background: #f44336; color: white; }
-        .btn-right { grid-column: 3; grid-row: 2; }
-        .btn-backward { grid-column: 2; grid-row: 3; }
-
-        .voice-input {
-            margin-top: 15px;
-        }
-
-        .voice-btn {
-            width: 100%;
-            padding: 20px;
             border: none;
             border-radius: 10px;
-            font-size: 1.2em;
-            font-weight: bold;
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
             cursor: pointer;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
             transition: all 0.3s;
         }
-
-        .voice-btn:hover {
+        
+        button:hover {
+            background: rgba(255, 255, 255, 0.3);
             transform: scale(1.05);
         }
-
-        .voice-btn.listening {
-            background: #4CAF50;
-            animation: pulse 1.5s infinite;
+        
+        button:active {
+            transform: scale(0.95);
         }
-
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.05); }
+        
+        .btn-stop {
+            background: #ff4444;
+            grid-column: span 3;
+            font-size: 1.2em;
+            font-weight: bold;
         }
-
+        
+        .btn-stop:hover {
+            background: #ff6666;
+        }
+        
+        #cameraFeed {
+            width: 100%;
+            border-radius: 10px;
+            background: #000;
+            min-height: 240px;
+        }
+        
+        .sensor-data {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .sensor-item {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 10px;
+            border-radius: 8px;
+        }
+        
+        .sensor-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #00ff00;
+        }
+        
+        #voiceBtn {
+            background: #ff6b6b;
+            grid-column: span 3;
+        }
+        
+        #voiceBtn:hover {
+            background: #ff8787;
+        }
+        
         .log-container {
-            background: rgba(0,0,0,0.3);
+            background: rgba(0, 0, 0, 0.3);
             border-radius: 10px;
             padding: 15px;
-            max-height: 200px;
+            height: 200px;
             overflow-y: auto;
             font-family: 'Courier New', monospace;
             font-size: 0.9em;
         }
-
+        
         .log-entry {
-            padding: 5px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 5px;
+            opacity: 0.9;
         }
-
-        .log-entry:last-child {
-            border-bottom: none;
-        }
-
-        .stream-container {
-            background: #000;
-            border-radius: 10px;
-            overflow: hidden;
-            aspect-ratio: 4/3;
-        }
-
-        .stream-container img {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-        }
-
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-            margin-top: 15px;
-        }
-
-        .stat-item {
-            background: rgba(0,0,0,0.2);
-            padding: 10px;
-            border-radius: 8px;
-            text-align: center;
-        }
-
-        .stat-value {
-            font-size: 1.5em;
-            font-weight: bold;
-            display: block;
-            margin-top: 5px;
-        }
-
-        .expression-buttons {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-            margin-top: 15px;
-        }
+        
+        .log-entry.info { color: #00ff00; }
+        .log-entry.warning { color: #ffaa00; }
+        .log-entry.error { color: #ff0000; }
     </style>
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>🤖 Robot Control Dashboard</h1>
-            <div class="status-indicator" id="status">Connecting...</div>
-        </header>
-
-        <div class="dashboard-grid">
-            <!-- Manual Control -->
+        <h1>🤖 Robot Control Dashboard</h1>
+        
+        <div class="grid">
+            <!-- Status Card -->
             <div class="card">
-                <h2>🎮 Manual Control</h2>
-                <div class="control-buttons">
-                    <button class="btn btn-forward" onclick="sendMovement('forward')">▲ Forward</button>
-                    <button class="btn btn-left" onclick="sendMovement('left')">◄ Left</button>
-                    <button class="btn btn-stop" onclick="sendStop()">■ STOP</button>
-                    <button class="btn btn-right" onclick="sendMovement('right')">► Right</button>
-                    <button class="btn btn-backward" onclick="sendMovement('backward')">▼ Backward</button>
-                </div>
-                <div class="voice-input">
-                    <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()">🎤 Voice Command</button>
+                <h2>System Status</h2>
+                <div id="statusInfo">
+                    <p><span class="status-indicator status-disconnected" id="piStatus"></span>Raspberry Pi: <span id="piStatusText">Disconnected</span></p>
+                    <p><span class="status-indicator status-disconnected" id="serverStatus"></span>Server: <span id="serverStatusText">Connecting...</span></p>
                 </div>
             </div>
-
-            <!-- Face Expressions -->
+            
+            <!-- Movement Controls -->
             <div class="card">
-                <h2>😊 Face Expressions</h2>
-                <div class="expression-buttons">
-                    <button class="btn" onclick="sendExpression('happy')">😊 Happy</button>
-                    <button class="btn" onclick="sendExpression('sad')">😢 Sad</button>
-                    <button class="btn" onclick="sendExpression('surprised')">😲 Surprised</button>
-                    <button class="btn" onclick="sendExpression('angry')">😠 Angry</button>
+                <h2>Movement Control</h2>
+                <div class="controls">
+                    <div></div>
+                    <button onclick="sendMovement('forward')">↑ Forward</button>
+                    <div></div>
+                    <button onclick="sendMovement('left')">← Left</button>
+                    <button onclick="sendMovement('backward')">↓ Back</button>
+                    <button onclick="sendMovement('right')">Right →</button>
+                    <button class="btn-stop" onclick="sendStop()">⛔ STOP</button>
                 </div>
             </div>
-
-            <!-- Camera Stream -->
+            
+            <!-- Voice Control -->
             <div class="card">
-                <h2>📷 Camera Feed</h2>
-                <div class="stream-container">
-                    <img id="cameraStream" src="/video_feed" alt="Camera feed">
+                <h2>Voice Control</h2>
+                <div class="controls">
+                    <button id="voiceBtn" onclick="startVoiceCommand()">🎤 Speak Command</button>
                 </div>
+                <p style="margin-top: 10px; opacity: 0.8; font-size: 0.9em;" id="voiceStatus">Click to speak</p>
             </div>
-
-            <!-- SLAM Map -->
+            
+            <!-- Camera Feed -->
             <div class="card">
-                <h2>🗺️ SLAM Map</h2>
-                <div class="stream-container">
-                    <img id="slamMap" src="/map_feed" alt="SLAM map">
-                </div>
+                <h2>Camera Feed</h2>
+                <img id="cameraFeed" src="" alt="Camera feed">
             </div>
-
-            <!-- System Stats -->
+            
+            <!-- Sensor Data -->
             <div class="card">
-                <h2>📊 System Stats</h2>
-                <div class="stats">
-                    <div class="stat-item">
-                        <span>Latency</span>
-                        <span class="stat-value" id="latency">0ms</span>
+                <h2>Sensors</h2>
+                <div class="sensor-data">
+                    <div class="sensor-item">
+                        <div>Distance</div>
+                        <div class="sensor-value" id="ultrasonicValue">--</div>
                     </div>
-                    <div class="stat-item">
-                        <span>FPS</span>
-                        <span class="stat-value" id="fps">0</span>
-                    </div>
-                    <div class="stat-item">
-                        <span>Distance</span>
-                        <span class="stat-value" id="distance">--cm</span>
-                    </div>
-                    <div class="stat-item">
-                        <span>Battery</span>
-                        <span class="stat-value" id="battery">--</span>
+                    <div class="sensor-item">
+                        <div>LiDAR Points</div>
+                        <div class="sensor-value" id="lidarPoints">--</div>
                     </div>
                 </div>
             </div>
-
+            
             <!-- Activity Log -->
             <div class="card">
-                <h2>📝 Activity Log</h2>
+                <h2>Activity Log</h2>
                 <div class="log-container" id="logContainer"></div>
             </div>
         </div>
     </div>
-
+    
     <script>
-        // Initialize SocketIO
+        // Initialize Socket.IO
         const socket = io();
-        let isListening = false;
-
-        // Connection status
+        
+        // Connection handlers
         socket.on('connect', () => {
-            updateStatus(true);
-            addLog('Connected to server');
+            addLog('Connected to server', 'info');
+            document.getElementById('serverStatus').className = 'status-indicator status-connected';
+            document.getElementById('serverStatusText').textContent = 'Connected';
         });
-
+        
         socket.on('disconnect', () => {
-            updateStatus(false);
-            addLog('Disconnected from server');
+            addLog('Disconnected from server', 'warning');
+            document.getElementById('serverStatus').className = 'status-indicator status-disconnected';
+            document.getElementById('serverStatusText').textContent = 'Disconnected';
         });
-
-        // Status updates
+        
+        // Pi status
         socket.on('pi_status', (data) => {
-            updateStatus(data.connected);
+            const connected = data.connected;
+            document.getElementById('piStatus').className = 'status-indicator ' + (connected ? 'status-connected' : 'status-disconnected');
+            document.getElementById('piStatusText').textContent = connected ? 'Connected' : 'Disconnected';
+            addLog('Pi ' + (connected ? 'connected' : 'disconnected'), 'info');
         });
-
+        
+        // Camera feed
+        socket.on('camera_frame', (data) => {
+            document.getElementById('cameraFeed').src = 'data:image/jpeg;base64,' + data.frame;
+        });
+        
         // Sensor data
         socket.on('ultrasonic_data', (data) => {
-            document.getElementById('distance').textContent = `${data.distance}cm`;
+            document.getElementById('ultrasonicValue').textContent = data.distance.toFixed(1) + ' cm';
         });
-
+        
+        socket.on('lidar_scan', (data) => {
+            document.getElementById('lidarPoints').textContent = data.ranges.length;
+        });
+        
         // Functions
-        function updateStatus(connected) {
-            const status = document.getElementById('status');
-            if (connected) {
-                status.textContent = '● Connected';
-                status.className = 'status-indicator connected';
-            } else {
-                status.textContent = '● Disconnected';
-                status.className = 'status-indicator disconnected';
-            }
-        }
-
         function sendMovement(direction) {
-            socket.emit('manual_control', {
-                direction: direction,
-                duration: 2
-            });
-            addLog(`Movement: ${direction}`);
+            const duration = parseFloat(prompt('Duration in seconds:', '2')) || 2;
+            socket.emit('movement_command', {direction, duration});
+            addLog(`Moving ${direction} for ${duration}s`, 'info');
         }
-
+        
         function sendStop() {
-            socket.emit('stop_robot');
-            addLog('STOP command sent');
+            socket.emit('stop_command', {});
+            addLog('Emergency stop', 'warning');
         }
-
-        function sendExpression(expression) {
-            socket.emit('face_expression', { expression: expression });
-            addLog(`Expression: ${expression}`);
+        
+        function startVoiceCommand() {
+            document.getElementById('voiceStatus').textContent = 'Listening...';
+            // Implement voice recognition here
+            addLog('Voice command feature coming soon', 'info');
+            setTimeout(() => {
+                document.getElementById('voiceStatus').textContent = 'Click to speak';
+            }, 2000);
         }
-
-        function toggleVoice() {
-            const btn = document.getElementById('voiceBtn');
-            if (!isListening) {
-                isListening = true;
-                btn.classList.add('listening');
-                btn.textContent = '🎤 Listening...';
-                socket.emit('start_voice_input');
-                addLog('Voice input started');
-            } else {
-                isListening = false;
-                btn.classList.remove('listening');
-                btn.textContent = '🎤 Voice Command';
-                socket.emit('stop_voice_input');
-                addLog('Voice input stopped');
-            }
-        }
-
-        function addLog(message) {
-            const logContainer = document.getElementById('logContainer');
-            const timestamp = new Date().toLocaleTimeString();
+        
+        function addLog(message, type = 'info') {
+            const container = document.getElementById('logContainer');
             const entry = document.createElement('div');
-            entry.className = 'log-entry';
+            entry.className = 'log-entry ' + type;
+            const timestamp = new Date().toLocaleTimeString();
             entry.textContent = `[${timestamp}] ${message}`;
-            logContainer.insertBefore(entry, logContainer.firstChild);
-            
-            // Keep only last 20 entries
-            while (logContainer.children.length > 20) {
-                logContainer.removeChild(logContainer.lastChild);
-            }
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
         }
-
+        
         // Keyboard controls
         document.addEventListener('keydown', (e) => {
             switch(e.key) {
@@ -388,35 +311,12 @@
                     sendMovement('right');
                     break;
                 case ' ':
-                case 'Escape':
                     sendStop();
                     break;
             }
         });
-
-        // Voice command received
-        socket.on('voice_command', (data) => {
-            addLog(`Voice: "${data.text}"`);
-        });
-
-        // AI response
-        socket.on('ai_response', (data) => {
-            addLog(`Robot: "${data.text}"`);
-        });
-
-        // Update FPS counter
-        let frameCount = 0;
-        setInterval(() => {
-            document.getElementById('fps').textContent = frameCount;
-            frameCount = 0;
-        }, 1000);
-
-        // Count frames
-        document.getElementById('cameraStream').addEventListener('load', () => {
-            frameCount++;
-        });
-
-        addLog('Dashboard loaded');
+        
+        addLog('Dashboard initialized', 'info');
     </script>
 </body>
 </html>
