@@ -1,237 +1,194 @@
 #!/usr/bin/env python3
 """
-Text-to-Speech Engine - Edge TTS with Phoneme Timing
-
-Generates speech audio from text with phoneme-level timing
-for lip-sync animation.
-
-Author: Distributed Robot System
-Date: January 2026
+TTS Engine Module - Edge TTS Integration
+Handles text-to-speech synthesis with phoneme timing for lip-sync
 """
 
-import logging
-import asyncio
-import edge_tts
 import os
-import json
+import asyncio
+import logging
 import tempfile
 from typing import Dict, List, Tuple
-from datetime import datetime
+import edge_tts
+import json
 
 logger = logging.getLogger(__name__)
 
-
 class TTSEngine:
-    """Text-to-Speech engine with phoneme timing for lip-sync."""
+    """Edge TTS engine with phoneme timing extraction."""
     
     def __init__(self, config: Dict):
-        """
-        Initialize TTS engine.
+        """Initialize TTS Engine.
         
         Args:
-            config: TTS configuration dictionary
+            config: Configuration dictionary from robot_config.yaml
         """
-        self.config = config.get('ai', {}).get('tts', {})
+        self.config = config
+        self.voice = config.get('tts', {}).get('voice', 'en-IN-NeerjaNeural')
+        self.rate = config.get('tts', {}).get('rate', '+0%')
+        self.pitch = config.get('tts', {}).get('pitch', '+0Hz')
+        self.volume = config.get('tts', {}).get('volume', '+0%')
         
-        # Voice settings
-        self.voice = self.config.get('voice', 'en-IN-NeerjaNeural')
-        self.rate = self.config.get('rate', '+0%')
-        self.volume = self.config.get('volume', '+0%')
+        # Create audio output directory
+        self.audio_dir = os.path.join(os.path.dirname(__file__), '..', 'audio')
+        os.makedirs(self.audio_dir, exist_ok=True)
         
-        # Output directory
-        self.output_dir = 'audio_output'
-        os.makedirs(self.output_dir, exist_ok=True)
-        
-        # Phoneme to viseme mapping (for lip-sync)
-        self.phoneme_to_viseme = self._build_phoneme_map()
-        
-        logger.info(f"TTS Engine initialized (voice: {self.voice})")
-    
-    def _build_phoneme_map(self) -> Dict[str, str]:
-        """
-        Build phoneme to viseme mapping.
-        
-        Returns:
-            Dictionary mapping phonemes to mouth shapes
-        """
-        return {
-            # Closed/rest
-            'sil': 'closed',
-            'pau': 'closed',
-            
-            # A shapes (open)
-            'AA': 'A', 'AE': 'A', 'AH': 'A', 'AO': 'A', 'AW': 'A', 'AY': 'A',
-            
-            # E shapes (wide)
-            'EH': 'E', 'ER': 'E', 'EY': 'E', 'IH': 'E', 'IY': 'E',
-            
-            # O shapes (round)
-            'OW': 'O', 'OY': 'O', 'UH': 'O', 'UW': 'O',
-            
-            # M/B/P (closed lips)
-            'M': 'M', 'B': 'M', 'P': 'M',
-            
-            # F/V (teeth on lip)
-            'F': 'F', 'V': 'F',
-            
-            # TH (tongue between teeth)
-            'TH': 'TH', 'DH': 'TH',
-            
-            # L (tongue tip)
-            'L': 'L',
-            
-            # Default
-            'default': 'closed'
-        }
+        logger.info(f"TTS Engine initialized with voice: {self.voice}")
     
     async def synthesize_async(self, text: str) -> Tuple[str, List[Dict]]:
-        """
-        Synthesize speech from text asynchronously.
+        """Synthesize speech asynchronously with phoneme timing.
         
         Args:
             text: Text to synthesize
         
         Returns:
-            Tuple of (audio file path, phoneme timings list)
+            Tuple of (audio_file_path, phoneme_timings)
         """
         try:
             # Generate unique filename
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            audio_path = os.path.join(self.output_dir, f"speech_{timestamp}.mp3")
+            audio_file = os.path.join(self.audio_dir, f"tts_{hash(text) % 100000}.mp3")
             
             # Create TTS communicate object
             communicate = edge_tts.Communicate(
-                text,
+                text=text,
                 voice=self.voice,
                 rate=self.rate,
+                pitch=self.pitch,
                 volume=self.volume
             )
             
-            # Save audio and get metadata
             phonemes = []
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    with open(audio_path, "ab") as f:
+            
+            # Stream audio and collect phonemes
+            with open(audio_file, 'wb') as f:
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
                         f.write(chunk["data"])
-                elif chunk["type"] == "WordBoundary":
-                    # Extract timing information
-                    phonemes.append({
-                        'text': chunk.get('text', ''),
-                        'offset': chunk.get('offset', 0) / 10000000,  # Convert to seconds
-                        'duration': chunk.get('duration', 0) / 10000000
-                    })
+                    elif chunk["type"] == "WordBoundary":
+                        # Extract word timing for lip-sync
+                        phonemes.append({
+                            'text': chunk.get('text', ''),
+                            'offset': chunk.get('offset', 0) / 10000000.0,  # Convert to seconds
+                            'duration': chunk.get('duration', 0) / 10000000.0
+                        })
             
-            # Generate viseme timings
-            viseme_timings = self._generate_viseme_timings(phonemes)
-            
-            logger.info(f"Synthesized: {text[:50]}... -> {audio_path}")
-            logger.debug(f"Generated {len(viseme_timings)} viseme keyframes")
-            
-            return audio_path, viseme_timings
+            logger.info(f"TTS generated: {audio_file} with {len(phonemes)} word boundaries")
+            return audio_file, phonemes
             
         except Exception as e:
             logger.error(f"TTS synthesis error: {e}")
-            return None, []
+            raise
     
     def synthesize(self, text: str) -> Tuple[str, List[Dict]]:
-        """
-        Synchronous wrapper for synthesize.
+        """Synchronous wrapper for synthesize_async.
         
         Args:
             text: Text to synthesize
         
         Returns:
-            Tuple of (audio file path, phoneme timings list)
+            Tuple of (audio_file_path, phoneme_timings)
         """
         return asyncio.run(self.synthesize_async(text))
     
-    def _generate_viseme_timings(self, phonemes: List[Dict]) -> List[Dict]:
-        """
-        Generate viseme timings from phoneme data.
+    def get_phoneme_timings(self, text: str, phonemes: List[Dict]) -> List[Dict]:
+        """Convert word boundaries to mouth shape timings.
         
         Args:
-            phonemes: List of phoneme dictionaries
+            text: Original text
+            phonemes: Word boundary timings from Edge TTS
         
         Returns:
-            List of viseme timing dictionaries
+            List of mouth shape keyframes for animation
         """
-        visemes = []
+        mouth_shapes = []
         
         for phoneme in phonemes:
-            # Extract phoneme from text (simplified)
-            text = phoneme.get('text', '').upper()
+            word = phoneme['text'].lower()
+            offset = phoneme['offset']
+            duration = phoneme['duration']
             
-            # Determine viseme
-            viseme = 'closed'
-            for char in text:
-                if char in 'AEIOU':
-                    if char in 'AE':
-                        viseme = 'A'
-                    elif char in 'EI':
-                        viseme = 'E'
-                    else:
-                        viseme = 'O'
-                    break
-                elif char in 'MBP':
-                    viseme = 'M'
-                    break
-                elif char in 'FV':
-                    viseme = 'F'
-                    break
+            # Map words to mouth shapes (simplified viseme mapping)
+            mouth_shape = self._get_mouth_shape(word)
             
-            visemes.append({
-                'viseme': viseme,
-                'time': phoneme.get('offset', 0),
-                'duration': phoneme.get('duration', 0.1)
+            mouth_shapes.append({
+                'time': offset,
+                'shape': mouth_shape,
+                'duration': duration
             })
         
-        # Add closing viseme
-        if visemes:
-            last_time = visemes[-1]['time'] + visemes[-1]['duration']
-            visemes.append({
-                'viseme': 'closed',
-                'time': last_time,
-                'duration': 0.1
-            })
-        
-        return visemes
+        return mouth_shapes
     
-    def cleanup_old_files(self, max_age_hours: int = 24):
-        """Remove old audio files."""
-        import time
+    def _get_mouth_shape(self, word: str) -> str:
+        """Map word to basic mouth shape.
         
-        now = time.time()
-        max_age_seconds = max_age_hours * 3600
+        Args:
+            word: Word to analyze
         
-        for filename in os.listdir(self.output_dir):
-            filepath = os.path.join(self.output_dir, filename)
-            if os.path.isfile(filepath):
-                age = now - os.path.getmtime(filepath)
-                if age > max_age_seconds:
-                    os.remove(filepath)
-                    logger.debug(f"Removed old audio file: {filename}")
+        Returns:
+            Mouth shape identifier
+        """
+        # Simplified mouth shape detection based on vowel sounds
+        if not word:
+            return 'closed'
+        
+        first_char = word[0].lower()
+        
+        # Vowel-based mapping
+        if first_char in 'aeiou':
+            if first_char in 'ae':
+                return 'open'      # Wide open
+            elif first_char in 'io':
+                return 'round'     # Rounded
+            else:
+                return 'medium'    # Medium open
+        else:
+            # Consonants
+            if first_char in 'mbp':
+                return 'closed'    # Lips together
+            elif first_char in 'fv':
+                return 'narrow'    # Narrow opening
+            else:
+                return 'medium'    # Default
+    
+    def cleanup_old_audio(self, max_files: int = 50):
+        """Clean up old audio files to prevent disk filling.
+        
+        Args:
+            max_files: Maximum number of files to keep
+        """
+        try:
+            files = [os.path.join(self.audio_dir, f) for f in os.listdir(self.audio_dir)
+                    if f.startswith('tts_') and f.endswith('.mp3')]
+            
+            if len(files) > max_files:
+                # Sort by modification time and remove oldest
+                files.sort(key=os.path.getmtime)
+                for old_file in files[:len(files) - max_files]:
+                    os.remove(old_file)
+                    logger.debug(f"Removed old audio file: {old_file}")
+        except Exception as e:
+            logger.warning(f"Audio cleanup error: {e}")
 
 
 if __name__ == "__main__":
-    # Test TTS engine
+    # Test the TTS Engine
     import yaml
     
     logging.basicConfig(level=logging.INFO)
     
-    with open('../config/robot_config.yaml', 'r') as f:
+    with open('config/robot_config.yaml') as f:
         config = yaml.safe_load(f)
     
     tts = TTSEngine(config)
     
     # Test synthesis
-    test_text = "Hello! I am a friendly robot. I can move forward, backward, left, and right."
+    test_text = "Hello! I am moving forward for three seconds."
+    audio_file, phonemes = tts.synthesize(test_text)
     
-    print(f"\nSynthesizing: {test_text}")
-    audio_path, visemes = tts.synthesize(test_text)
+    print(f"\nAudio file: {audio_file}")
+    print(f"Phonemes: {len(phonemes)}")
     
-    if audio_path:
-        print(f"\nAudio saved to: {audio_path}")
-        print(f"Generated {len(visemes)} viseme keyframes")
-        print(f"\nFirst 5 visemes:")
-        for viseme in visemes[:5]:
-            print(f"  {viseme['time']:.2f}s: {viseme['viseme']} ({viseme['duration']:.2f}s)")
+    mouth_shapes = tts.get_phoneme_timings(test_text, phonemes)
+    print(f"\nMouth shapes:")
+    for shape in mouth_shapes[:5]:  # Show first 5
+        print(f"  {shape['time']:.2f}s: {shape['shape']} ({shape['duration']:.2f}s)")
