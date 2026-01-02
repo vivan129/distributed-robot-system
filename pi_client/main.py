@@ -1,244 +1,237 @@
 #!/usr/bin/env python3
 """
-Raspberry Pi Client - Main Entry Point
-
-Connects to PC server and handles hardware I/O:
-- Motor control
-- Camera streaming  
-- LiDAR streaming
-- Ultrasonic sensing
-- Face display
-- Audio playback
+Raspberry Pi Client - Hardware Interface
+Handles motors, camera, sensors, and display
 """
 
-import os
 import sys
+import os
+
+# Check Python version
+if sys.version_info < (3, 9):
+    print("❌ ERROR: Python 3.9 or higher is required!")
+    print(f"   Current version: {sys.version}")
+    print("\nPlease upgrade Python on Raspberry Pi:")
+    print("  sudo apt update")
+    print("  sudo apt install python3.9 python3.9-venv")
+    sys.exit(1)
+
+print(f"✅ Python version: {sys.version.split()[0]}")
+print("🤖 Starting Raspberry Pi Client...")
+print("="*60)
+
+# Import remaining modules after version check
 import logging
-import yaml
-import asyncio
-import socketio
-import signal
-import base64
-import tempfile
+import time
 from pathlib import Path
+import yaml
+import socketio
+from dotenv import load_dotenv
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Load environment variables
+load_dotenv()
 
-from hardware.motor_controller import MotorController
-from hardware.camera_streamer import CameraStreamer
-from hardware.lidar_streamer import LiDARStreamer
-from hardware.ultrasonic_sensor import UltrasonicSensor
+# Create logs directory
+log_dir = Path('../logs')
+log_dir.mkdir(exist_ok=True)
 
 # Setup logging
+log_level = os.getenv('LOG_LEVEL', 'INFO')
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, log_level),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
+# Load config
+try:
+    with open('../config/robot_config.yaml') as f:
+        config = yaml.safe_load(f)
+    logger.info("✅ Configuration loaded")
+except FileNotFoundError:
+    logger.error("❌ Configuration file not found: ../config/robot_config.yaml")
+    sys.exit(1)
 
-class RobotPiClient:
-    """Raspberry Pi robot client."""
-    
-    def __init__(self, config_path: str = '../config/robot_config.yaml'):
-        """Initialize Pi client."""
-        # Load configuration
-        with open(config_path, 'r') as f:
-            self.config = yaml.safe_load(f)
-        
-        # Network config
-        network = self.config['network']
-        self.pc_url = f"http://{network['pc_ip']}:{network['pc_port']}"
-        
-        # Initialize hardware
-        logger.info("Initializing hardware...")
-        self.motors = MotorController(self.config)
-        self.camera = CameraStreamer(self.config)
-        
-        try:
-            self.lidar = LiDARStreamer(self.config)
-        except Exception as e:
-            logger.warning(f"LiDAR initialization failed: {e}")
-            self.lidar = None
-        
-        try:
-            self.ultrasonic = UltrasonicSensor(self.config)
-        except Exception as e:
-            logger.warning(f"Ultrasonic sensor initialization failed: {e}")
-            self.ultrasonic = None
-        
-        # SocketIO client
-        self.sio = socketio.AsyncClient()
-        self._setup_socketio_events()
-        
-        # State
-        self.connected = False
-        self.running = True
-        
-        # Register signal handlers
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-    
-    def _signal_handler(self, sig, frame):
-        """Handle shutdown signals."""
-        logger.info(f"Received signal {sig}, shutting down...")
-        self.running = False
-        self.motors.stop()
-    
-    def _setup_socketio_events(self):
-        """Setup SocketIO event handlers."""
-        
-        @self.sio.event
-        async def connect():
-            logger.info(f"Connected to PC: {self.pc_url}")
-            self.connected = True
-            await self.sio.emit('pi_connected', {'status': 'ready'})
-        
-        @self.sio.event
-        async def disconnect():
-            logger.info("Disconnected from PC")
-            self.connected = False
-            self.motors.stop()
-        
-        @self.sio.on('movement_command')
-        async def handle_movement(data):
-            """Handle movement command from PC."""
-            try:
-                direction = data.get('direction')
-                duration = data.get('duration', 0)
-                
-                logger.info(f"Movement command: {direction} for {duration}s")
-                self.motors.move(direction, duration)
-                
-                await self.sio.emit('movement_complete', {'direction': direction})
-            
-            except Exception as e:
-                logger.error(f"Movement error: {e}")
-        
-        @self.sio.on('stop_command')
-        async def handle_stop(data):
-            """Handle emergency stop."""
-            logger.info("Emergency stop command")
-            self.motors.stop()
-            await self.sio.emit('stop_complete', {})
-        
-        @self.sio.on('play_audio')
-        async def handle_audio(data):
-            """Handle audio playback command."""
-            try:
-                # Decode audio data
-                audio_data = base64.b64decode(data['audio_data'])
-                
-                # Save to temporary file
-                with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as f:
-                    f.write(audio_data)
-                    audio_path = f.name
-                
-                # Play audio
-                os.system(f"mpg123 -q {audio_path} &")
-                
-                # Cleanup
-                os.remove(audio_path)
-                
-                logger.info("Audio playback started")
-            
-            except Exception as e:
-                logger.error(f"Audio playback error: {e}")
-    
-    async def stream_camera(self):
-        """Stream camera frames to PC."""
-        async def send_frame(frame_data):
-            if self.connected:
-                await self.sio.emit('camera_frame', {'frame': frame_data})
-        
-        await self.camera.stream_frames(send_frame)
-    
-    async def stream_lidar(self):
-        """Stream LiDAR scans to PC."""
-        if not self.lidar:
-            return
-        
-        async def send_scan(scan_data):
-            if self.connected:
-                await self.sio.emit('lidar_scan', scan_data)
-        
-        await self.lidar.stream_scans(send_scan)
-    
-    async def monitor_ultrasonic(self):
-        """Monitor ultrasonic sensor."""
-        if not self.ultrasonic:
-            return
-        
-        while self.running:
-            try:
-                distance = self.ultrasonic.measure_distance()
-                
-                if distance and self.connected:
-                    await self.sio.emit('ultrasonic_data', {'distance': distance})
-                    
-                    # Emergency stop if obstacle too close
-                    safety_threshold = self.config.get('safety', {}).get('obstacle_threshold', 30)
-                    if distance < safety_threshold and self.motors.is_moving:
-                        logger.warning(f"Obstacle detected at {distance}cm, stopping!")
-                        self.motors.stop()
-                
-                await asyncio.sleep(0.1)
-            
-            except Exception as e:
-                logger.error(f"Ultrasonic error: {e}")
-                await asyncio.sleep(1)
-    
-    async def run(self):
-        """Main run loop."""
-        try:
-            # Connect to PC
-            logger.info(f"Connecting to PC at {self.pc_url}...")
-            await self.sio.connect(self.pc_url, namespaces=['/pi'])
-            
-            # Start background tasks
-            tasks = [
-                asyncio.create_task(self.stream_camera()),
-                asyncio.create_task(self.monitor_ultrasonic())
-            ]
-            
-            if self.lidar:
-                tasks.append(asyncio.create_task(self.stream_lidar()))
-            
-            # Wait for tasks
-            await asyncio.gather(*tasks)
-        
-        except Exception as e:
-            logger.error(f"Runtime error: {e}")
-        
-        finally:
-            self.cleanup()
-    
-    def cleanup(self):
-        """Cleanup resources."""
-        logger.info("Cleaning up...")
-        
-        self.motors.cleanup()
-        self.camera.release()
-        
-        if self.lidar:
-            self.lidar.release()
-        
-        logger.info("Cleanup complete")
+# Check if running on Raspberry Pi
+skip_hardware = os.getenv('SKIP_HARDWARE_INIT', 'False').lower() == 'true'
 
+try:
+    if not skip_hardware:
+        from hardware.motor_controller import MotorController
+        from hardware.camera_module import CameraModule
+        from hardware.lidar_module import LidarModule
+        from display.face_display import FaceDisplay
+        logger.info("✅ Hardware modules imported")
+    else:
+        logger.warning("⚠️  Hardware initialization skipped (SKIP_HARDWARE_INIT=True)")
+except ImportError as e:
+    if 'RPi.GPIO' in str(e):
+        logger.error("❌ RPi.GPIO not available - are you running on a Raspberry Pi?")
+        logger.error("   For development on PC, set SKIP_HARDWARE_INIT=True in .env")
+    else:
+        logger.error(f"❌ Failed to import hardware modules: {e}")
+    sys.exit(1)
 
-if __name__ == "__main__":
-    print("\n" + "="*60)
-    print("🤖 RASPBERRY PI CLIENT STARTING")
-    print("="*60 + "\n")
-    
+# Initialize SocketIO client
+sio = socketio.Client()
+network_config = config.get('network', {})
+pc_server_url = f"http://{network_config.get('pc_ip')}:{network_config.get('pc_port')}"
+
+logger.info(f"🌐 Connecting to PC server: {pc_server_url}")
+
+# Initialize hardware (if not skipped)
+if not skip_hardware:
     try:
-        client = RobotPiClient()
-        asyncio.run(client.run())
-    
-    except KeyboardInterrupt:
-        print("\n\nShutdown requested...")
-    
+        motors = MotorController(config)
+        camera = CameraModule(config)
+        lidar = LidarModule(config) if config.get('lidar', {}).get('enabled', False) else None
+        display = FaceDisplay(config)
+        logger.info("✅ Hardware initialized")
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
+        logger.error(f"❌ Hardware initialization failed: {e}")
+        sys.exit(1)
+
+
+# SocketIO event handlers
+@sio.event
+def connect():
+    logger.info("✅ Connected to PC server")
+    sio.emit('pi_connected', {'status': 'ready'}, namespace='/pi')
+
+
+@sio.event
+def disconnect():
+    logger.warning("⚠️  Disconnected from PC server")
+    if not skip_hardware:
+        motors.stop()
+
+
+@sio.on('movement', namespace='/pi')
+def handle_movement(data):
+    """Execute movement command"""
+    if skip_hardware:
+        logger.info(f"[SIMULATION] Movement: {data}")
+        return
+        
+    try:
+        direction = data.get('direction')
+        duration = data.get('duration', 2.0)
+        
+        logger.info(f"Moving {direction} for {duration}s")
+        
+        if direction == 'forward':
+            motors.forward()
+        elif direction == 'backward':
+            motors.backward()
+        elif direction == 'left':
+            motors.turn_left()
+        elif direction == 'right':
+            motors.turn_right()
+        elif direction == 'stop':
+            motors.stop()
+            
+        if direction != 'stop':
+            time.sleep(duration)
+            motors.stop()
+            
+        sio.emit('movement_complete', {'direction': direction, 'duration': duration}, namespace='/pi')
+        
+    except Exception as e:
+        logger.error(f"Movement error: {e}")
+
+
+@sio.on('stop', namespace='/pi')
+def handle_stop(data):
+    """Emergency stop"""
+    if not skip_hardware:
+        motors.stop()
+    logger.info("🛑 Emergency stop")
+    sio.emit('stop_complete', {}, namespace='/pi')
+
+
+@sio.on('face_animation', namespace='/pi')
+def handle_face_animation(data):
+    """Display face animation"""
+    if skip_hardware:
+        logger.info("[SIMULATION] Face animation received")
+        return
+        
+    try:
+        animation_data = data.get('animation')
+        duration = data.get('duration', 2.0)
+        display.play_animation(animation_data, duration)
+    except Exception as e:
+        logger.error(f"Face animation error: {e}")
+
+
+@sio.on('audio', namespace='/pi')
+def handle_audio(data):
+    """Play audio"""
+    if skip_hardware:
+        logger.info("[SIMULATION] Audio received")
+        return
+        
+    try:
+        audio_data = data.get('audio')
+        # TODO: Implement audio playback
+        logger.info("Playing audio...")
+    except Exception as e:
+        logger.error(f"Audio playback error: {e}")
+
+
+def camera_stream():
+    """Stream camera frames to PC"""
+    if skip_hardware:
+        return
+        
+    while True:
+        try:
+            frame = camera.get_frame()
+            if frame is not None:
+                sio.emit('camera_frame', {'frame': frame}, namespace='/pi')
+            time.sleep(0.033)  # ~30 FPS
+        except Exception as e:
+            logger.error(f"Camera stream error: {e}")
+            time.sleep(1)
+
+
+def lidar_stream():
+    """Stream LiDAR data to PC"""
+    if skip_hardware or lidar is None:
+        return
+        
+    while True:
+        try:
+            scan_data = lidar.get_scan()
+            if scan_data:
+                sio.emit('lidar_scan', scan_data, namespace='/pi')
+            time.sleep(0.1)  # 10 Hz
+        except Exception as e:
+            logger.error(f"LiDAR stream error: {e}")
+            time.sleep(1)
+
+
+if __name__ == '__main__':
+    try:
+        # Connect to PC server
+        sio.connect(pc_server_url, namespaces=['/pi'])
+        
+        logger.info("="*60)
+        logger.info("✅ Raspberry Pi client running")
+        logger.info(f"🔗 Connected to: {pc_server_url}")
+        logger.info("="*60)
+        
+        # Start streaming (in separate threads if needed)
+        # For now, just keep the connection alive
+        sio.wait()
+        
+    except KeyboardInterrupt:
+        logger.info("\n🛑 Shutting down...")
+        if not skip_hardware:
+            motors.cleanup()
+        sio.disconnect()
+    except Exception as e:
+        logger.error(f"❌ Fatal error: {e}")
+        if not skip_hardware:
+            motors.cleanup()
         sys.exit(1)

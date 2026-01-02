@@ -1,12 +1,26 @@
+#!/usr/bin/env python3
 """
 PC Server - Main Orchestrator
 Handles all processing and sends commands to Pi
 """
 
+import sys
+import os
+
+# Check Python version first
+if sys.version_info < (3, 9):
+    print("❌ ERROR: Python 3.9 or higher is required!")
+    print(f"   Current version: {sys.version}")
+    print("\nPlease upgrade Python:")
+    print("  Ubuntu/Debian: sudo apt install python3.9")
+    print("  macOS: brew install python@3.9")
+    print("  Windows: Download from https://www.python.org/downloads/")
+    sys.exit(1)
+
 import asyncio
 import logging
-import os
-from flask import Flask, render_template
+from pathlib import Path
+from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 import yaml
 from dotenv import load_dotenv
@@ -22,25 +36,75 @@ from modules.robot_controller import RobotController
 # Load environment variables
 load_dotenv()
 
-# Load config
-with open('../config/robot_config.yaml') as f:
-    config = yaml.safe_load(f)
+# Create logs directory if it doesn't exist
+log_dir = Path('../logs')
+log_dir.mkdir(exist_ok=True)
 
+# Setup logging
+log_level = os.getenv('LOG_LEVEL', 'INFO')
+log_file = os.getenv('LOG_FILE', 'logs/robot.log')
+
+logging.basicConfig(
+    level=getattr(logging, log_level),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(log_file) if os.getenv('LOG_TO_FILE', 'True').lower() == 'true' else logging.NullHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Load config
+try:
+    with open('../config/robot_config.yaml') as f:
+        config = yaml.safe_load(f)
+except FileNotFoundError:
+    logger.error("❌ Configuration file not found: ../config/robot_config.yaml")
+    sys.exit(1)
+
+# Flask app setup
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'robot_secret_key_change_me')
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+# Security: Check for custom secret key
+flask_secret = os.getenv('FLASK_SECRET_KEY', 'robot_secret_key_change_me')
+if flask_secret == 'robot_secret_key_change_me':
+    logger.warning("⚠️  WARNING: Using default Flask secret key! Set FLASK_SECRET_KEY in .env for production")
+    logger.warning("   Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'")
+
+app.config['SECRET_KEY'] = flask_secret
+
+# CORS configuration from environment
+cors_origins = os.getenv('CORS_ALLOWED_ORIGINS', '*')
+if cors_origins == '*':
+    logger.warning("⚠️  WARNING: CORS allows ALL origins! Set CORS_ALLOWED_ORIGINS in .env for production")
+
+socketio = SocketIO(
+    app, 
+    cors_allowed_origins=cors_origins,
+    async_mode=os.getenv('SOCKETIO_ASYNC_MODE', 'threading')
+)
+
+# Check for required API keys
+if not os.getenv('GEMINI_API_KEY'):
+    logger.error("❌ ERROR: GEMINI_API_KEY not set!")
+    logger.error("   1. Copy .env.example to .env")
+    logger.error("   2. Add your Gemini API key from https://ai.google.dev/")
+    sys.exit(1)
 
 # Initialize modules
-voice = VoiceInput(config)
-ai_brain = AIBrain(config)
-tts = TTSEngine(config)
-face = FaceAnimator(config)
-slam = SLAMProcessor(config)
-vision = VisionProcessor(config)
-robot = RobotController(config, socketio)
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+try:
+    voice = VoiceInput(config)
+    ai_brain = AIBrain(config)
+    tts = TTSEngine(config)
+    face = FaceAnimator(config)
+    slam = SLAMProcessor(config)
+    vision = VisionProcessor(config)
+    robot = RobotController(config, socketio)
+    logger.info("✅ All modules initialized successfully")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize modules: {e}")
+    logger.error("   Check that all dependencies are installed: pip install -r requirements.txt")
+    sys.exit(1)
 
 
 class RobotServer:
@@ -250,11 +314,10 @@ def handle_stop_complete(data):
 
 
 if __name__ == '__main__':
-    from flask import request
-    
     logger.info("="*60)
     logger.info("🖥️  ROBOT PC SERVER STARTING")
     logger.info("="*60)
+    logger.info(f"🐍 Python version: {sys.version.split()[0]}")
     
     # Get network config
     network_config = config.get('network', {})
@@ -262,16 +325,32 @@ if __name__ == '__main__':
     pc_port = network_config.get('pc_port', 5000)
     pi_ip = network_config.get('pi_ip', 'unknown')
     
-    logger.info(f"✓ Gemini AI: {os.getenv('GEMINI_API_KEY', 'NOT SET')[:20]}...")
-    logger.info(f"✓ TTS engine: Edge TTS")
-    logger.info(f"✓ Face animator: Ready")
-    logger.info(f"✓ SLAM processor: Initialized")
+    # Display configuration warnings
+    if pc_ip == "192.168.1.100" or pi_ip == "192.168.1.101":
+        logger.warning("⚠️  WARNING: Using default IP addresses from config!")
+        logger.warning("   Update config/robot_config.yaml with your actual IPs")
+    
+    api_key_preview = os.getenv('GEMINI_API_KEY', 'NOT SET')
+    if len(api_key_preview) > 20:
+        api_key_preview = api_key_preview[:20] + "..."
+    
+    logger.info(f"✅ Gemini AI: {api_key_preview}")
+    logger.info(f"✅ TTS engine: Edge TTS")
+    logger.info(f"✅ Face animator: Ready")
+    logger.info(f"✅ SLAM processor: Initialized")
     logger.info(f"🌐 Dashboard: http://{pc_ip}:{pc_port}")
     logger.info(f"🤖 Waiting for Raspberry Pi at {pi_ip}...")
     logger.info("="*60)
     
-    socketio.run(app, 
-                 host='0.0.0.0', 
-                 port=pc_port, 
-                 debug=False,
-                 allow_unsafe_werkzeug=True)
+    # Get host from environment or config
+    host = os.getenv('SERVER_HOST', '0.0.0.0')
+    port = int(os.getenv('SERVER_PORT', pc_port))
+    debug = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+    
+    socketio.run(
+        app, 
+        host=host, 
+        port=port, 
+        debug=debug,
+        allow_unsafe_werkzeug=True
+    )
