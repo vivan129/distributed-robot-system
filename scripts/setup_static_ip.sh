@@ -144,14 +144,17 @@ if systemctl is-active --quiet NetworkManager; then
     
     echo -e "${YELLOW}Configuring connection: $CONNECTION_NAME${NC}"
     
-    # Configure static IP
-    nmcli connection modify "$CONNECTION_NAME" ipv4.method manual
-    nmcli connection modify "$CONNECTION_NAME" ipv4.addresses "$STATIC_IP/$PREFIX"
-    nmcli connection modify "$CONNECTION_NAME" ipv4.gateway "$GATEWAY"
-    nmcli connection modify "$CONNECTION_NAME" ipv4.dns "$DNS1 $DNS2"
-    nmcli connection modify "$CONNECTION_NAME" ipv4.ignore-auto-dns yes
+    # Configure static IP - CRITICAL: Set all parameters in single command before method=manual
+    # This prevents "ipv4.addresses: this property cannot be empty for 'method=manual'" error
+    nmcli connection modify "$CONNECTION_NAME" \
+        ipv4.addresses "$STATIC_IP/$PREFIX" \
+        ipv4.gateway "$GATEWAY" \
+        ipv4.dns "$DNS1 $DNS2" \
+        ipv4.method manual \
+        ipv4.ignore-auto-dns yes
     
     # Restart connection
+    echo -e "${YELLOW}Restarting network connection...${NC}"
     nmcli connection down "$CONNECTION_NAME" 2>/dev/null || true
     sleep 2
     nmcli connection up "$CONNECTION_NAME"
