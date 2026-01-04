@@ -9,7 +9,7 @@ RPi.GPIO==0.7.1
 
 # Camera
 opencv-python==4.9.0.80
-# picamera2==0.3.12  # Uncomment if using Pi Camera
+picamera2==0.3.12 
 
 # LiDAR
 rplidar-roboticia==0.9.5
