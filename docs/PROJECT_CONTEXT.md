@@ -1,9 +1,10 @@
-# distributed-robot-system
+# Project Context
 
-## Overview
-Static web project (HTML/CSS/JS).
+- Detected type: web-static
+- File count: 40
+- Generated on: 2026-04-10
 
-## Current Contents
+## Key Files
 - `scripts/setup_static_ip.sh`
 - `scripts/create_directories.sh`
 - `scripts/setup_pc.sh`
@@ -16,22 +17,3 @@ Static web project (HTML/CSS/JS).
 - `pi_client/__init__.py`
 - `pi_client/requirements.txt`
 - `pi_client/hardware/lidar_module.py`
-
-## Top-Level Structure
-- `config/`
-- `docs/`
-- `logs/`
-- `pc_server/`
-- `pi_client/`
-- `scripts/`
-- `tests/`
-
-## Getting Started
-1. Serve locally: 
-2. Open .
-
-## Contributing
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## License
-See [LICENSE](LICENSE).
